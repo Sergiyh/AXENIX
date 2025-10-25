@@ -208,6 +208,25 @@ export default function Login() {
               Войти в комнату
             </button>
 
+            {/* ✅ Новая кнопка для перехода на JoinByLink.jsx */}
+            <button
+              onClick={() => navigate("/join-by-link")}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: "8px",
+                border: "1px solid #ff7300",
+                cursor: "pointer",
+                background: "#1a1a1a",
+                color: "#fff",
+                fontSize: "15px",
+                fontWeight: "500",
+                marginBottom: "20px",
+              }}
+            >
+              Войти по ссылке
+            </button>
+
             <div
               style={{
                 display: "flex",

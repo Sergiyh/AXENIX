@@ -14,12 +14,12 @@ export default function App() {
       <Routes>
         <Route path="/users" element={<Users />} />
         <Route path="/rooms" element={<Rooms />} />
-        <Route path="/join" element={<JoinByLink />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/room/:id" element={<Room />} />
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
         <Route path="*" element={<Login />} />
+        <Route path="/join-by-link" element={<JoinByLink />} />
       </Routes>
     </Router>
   );

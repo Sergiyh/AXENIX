@@ -75,7 +75,7 @@ export default function JoinByLink() {
           onChange={(e) => setInviteLink(e.target.value)}
           placeholder="https://app.site/rooms/12345"
           style={{
-            width: "100%",
+            width: "90%",
             padding: "10px 14px",
             borderRadius: "8px",
             border: "1px solid #444",
