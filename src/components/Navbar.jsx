@@ -27,10 +27,9 @@ const handleLogin = async () => {
         alert("Ошибка входа: неверные данные");
     }
     } catch (error) {
-    console.error(error);
-    alert("Ошибка входа: сервер недоступен или неверные данные");
+        alert("Ошибка входа: сервер недоступен или неверные данные");
     } finally {
-    setLoading(false);
+        setLoading(false);
     }
 };
 

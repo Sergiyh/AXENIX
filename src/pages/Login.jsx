@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../api/client";
 import { useNavigate } from "react-router-dom";
 
@@ -8,7 +8,26 @@ export default function Login() {
   const [showLogin, setShowLogin] = useState(false);
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
+  const [isChecking, setIsChecking] = useState(true);
   const navigate = useNavigate();
+
+  // Проверка авторизации при загрузке страницы
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const res = await api.get("/users/me");
+        if (res.status === 200) {
+          navigate("/rooms");
+        }
+      } catch (err) {
+        // Пользователь не авторизован - остаемся на странице логина
+      } finally {
+        setIsChecking(false);
+      }
+    };
+
+    checkAuth();
+  }, [navigate]);
 
   const handleJoinRoom = async () => {
     if (!roomCode.trim()) {
@@ -30,7 +49,6 @@ export default function Login() {
         navigate(`/room/${roomCode.trim()}`);
       }
     } catch (err) {
-      console.error(err);
       alert(err.response?.data?.detail || "Ошибка присоединения к комнате");
     }
   };
@@ -45,10 +63,29 @@ export default function Login() {
       if (res.status === 200) navigate("/rooms");
       else alert("Ошибка входа");
     } catch (err) {
-      console.error(err);
       alert("Ошибка входа");
     }
   };
+
+  // Показываем загрузку пока проверяем авторизацию
+  if (isChecking) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "100vh",
+          background: "linear-gradient(135deg, #141e30, #243b55)",
+          fontFamily: "Arial, sans-serif",
+          color: "#fff",
+          fontSize: "18px",
+        }}
+      >
+        Загрузка...
+      </div>
+    );
+  }
 
   return (
     <div

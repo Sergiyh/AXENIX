@@ -19,17 +19,8 @@ export default function Rooms() {
   };
 
   const logout = async () => {
-      await api.post("/auth/logout");
-      navigate(`/login`);
-  }
-
-  const createRoom = async () => {
-    try {
-      const res = await api.post("/rooms", {});
-      navigate(`/room/${res.data.code}`);
-    } catch {
-      alert("Ошибка создания комнаты");
-    }
+    await api.post("/auth/logout");
+    navigate(`/login`);
   };
 
   const joinRoom = async () => {
@@ -42,6 +33,27 @@ export default function Rooms() {
       navigate(`/room/${joinCode}`);
     } catch (e) {
       alert(e.response?.data?.detail || "Ошибка присоединения");
+    }
+  };
+
+  const joinExistingRoom = async (roomCode) => {
+    try {
+      await api.post("/rooms/join", { code: roomCode, nickname: "" });
+      navigate(`/room/${roomCode}`);
+    } catch (e) {
+      alert(e.response?.data?.detail || "Ошибка присоединения");
+    }
+  };
+
+  const createRoom = async () => {
+    try {
+      const res = await api.post("/rooms", {});
+      const roomCode = res.data.code;
+      await api.post("/rooms/join", { code: roomCode, nickname: "" });
+      navigate(`/room/${roomCode}`);
+    } catch (e) {
+      console.error(e);
+      alert("Ошибка создания комнаты");
     }
   };
 
@@ -76,7 +88,7 @@ export default function Rooms() {
           alignItems: "center",
         }}
       >
-        <h1 style={{ fontWeight: "700", fontSize: "28px" }}>MEETS</h1>
+        <h1 style={{ fontWeight: "700", fontSize: "28px" }}>AXENIX MEET</h1>
 
         <div style={{ position: "relative" }}>
           <button
@@ -194,18 +206,6 @@ export default function Rooms() {
             value={joinCode}
             onChange={(e) => setJoinCode(e.target.value)}
           />
-          <input
-            style={{
-              padding: "12px",
-              borderRadius: "8px",
-              border: "1px solid #555",
-              background: "#3c4043",
-              color: "#fff",
-            }}
-            placeholder="Ваше имя (опционально)"
-            value={nickname}
-            onChange={(e) => setNickname(e.target.value)}
-          />
           <button
             style={{
               padding: "12px 15px",
@@ -252,35 +252,59 @@ export default function Rooms() {
                   alignItems: "center",
                 }}
               >
-                <div
-                  style={{ cursor: "pointer", flex: 1 }}
-                  onClick={() => navigate(`/room/${room.code}`)}
-                >
+                <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: "600", marginBottom: "4px" }}>
                     Комната {room.code}
                   </div>
                   <div style={{ fontSize: "13px", opacity: 0.7 }}>
                     Создана: {new Date(room.created_at).toLocaleString("ru-RU")}
                   </div>
+                  {!room.is_active && (
+                    <div style={{ fontSize: "13px", color: "#d93025", marginTop: "4px" }}>
+                      Комната закрыта
+                    </div>
+                  )}
                 </div>
 
-                <button
-                  style={{
-                    padding: "6px 10px",
-                    background: "#d93025",
-                    borderRadius: "6px",
-                    color: "#fff",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteRoom(room.id);
-                  }}
-                >
-                  Удалить
-                </button>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  {room.is_active && (
+                    <button
+                      style={{
+                        padding: "6px 10px",
+                        background: "#1a73e8",
+                        borderRadius: "6px",
+                        color: "#fff",
+                        border: "none",
+                        cursor: "pointer",
+                        fontSize: "13px",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        joinExistingRoom(room.code);
+                      }}
+                    >
+                      Присоединиться
+                    </button>
+                  )}
+
+                  <button
+                    style={{
+                      padding: "6px 10px",
+                      background: "#d93025",
+                      borderRadius: "6px",
+                      color: "#fff",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteRoom(room.id);
+                    }}
+                  >
+                    Удалить
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

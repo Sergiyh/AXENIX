@@ -2,7 +2,8 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { useNavigate } from "react-router-dom";
 
-export default function Register() {const [nickname, setNickname] = useState("");const [password, setPassword] = useState("");const navigate = useNavigate();
+export default function Register() {
+    const [nickname, setNickname] = useState("");const [password, setPassword] = useState("");const navigate = useNavigate();
 const handleRegister = async () => {
     try {
 await api.post("/auth/register", {
