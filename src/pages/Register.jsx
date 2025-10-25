@@ -33,8 +33,7 @@ export default function Register() {
         justifyContent: "center",
         alignItems: "center",
         height: "100vh",
-        background:
-          "linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 40%, #ff6b00 120%)",
+        background:"linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 40%, #ff6b00 120%)",
         fontFamily: "'Inter', sans-serif",
         color: "#fff",
       }}
