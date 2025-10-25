@@ -29,7 +29,7 @@ export default function Rooms() {
       return;
     }
     try {
-      await api.post("/rooms/join", { code: joinCode, nickname });
+      data = await api.post("/rooms/join", { code: joinCode, nickname });
       navigate(`/room/${joinCode}`);
     } catch (e) {
       alert(e.response?.data?.detail || "Ошибка присоединения");
@@ -49,7 +49,8 @@ export default function Rooms() {
     try {
       const res = await api.post("/rooms", {});
       const roomCode = res.data.code;
-      await api.post("/rooms/join", { code: roomCode, nickname: "" });
+      const data = await api.post("/rooms/join", { code: roomCode, nickname: "" });
+
       navigate(`/room/${roomCode}`);
     } catch (e) {
       console.error(e);
