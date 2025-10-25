@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 export default function Login() {
   const [searchParams] = useSearchParams();
-  const roomCodeFromUrl = searchParams.get("room"); // Получаем ?room=xxx-xxx-xxx
+  const roomCodeFromUrl = searchParams.get("room");
 
   const [roomCode, setRoomCode] = useState(roomCodeFromUrl || "");
   const [guestNickname, setGuestNickname] = useState("");
@@ -14,39 +14,29 @@ export default function Login() {
   const [isChecking, setIsChecking] = useState(true);
   const navigate = useNavigate();
 
-  // Проверка авторизации при загрузке страницы
+  // Проверка авторизации при загрузке
   useEffect(() => {
     const checkAuth = async () => {
       try {
         const res = await api.get("/users/me");
         if (res.status === 200) {
-          // Пользователь авторизован
           if (roomCodeFromUrl) {
-            // Если есть код комнаты в URL - сразу присоединиться
             await joinRoomAuthorized(roomCodeFromUrl);
           } else {
-            // Иначе перейти на страницу комнат
             navigate("/rooms");
           }
         }
-      } catch (err) {
-        // Пользователь не авторизован - остаемся на странице
-      } finally {
+      } catch {}
+      finally {
         setIsChecking(false);
       }
     };
-
     checkAuth();
   }, [navigate, roomCodeFromUrl]);
 
-  // Присоединение для авторизованного пользователя (nickname = null)
   const joinRoomAuthorized = async (code) => {
     try {
-      data = await api.post("/rooms/join", {
-        code: code.trim(),
-        nickname: null, // Для авторизованных пользователей
-      });
-
+      await api.post("/rooms/join", { code: code.trim(), nickname: null });
       navigate(`/room/${code.trim()}`);
     } catch (err) {
       console.error(err);
@@ -55,7 +45,6 @@ export default function Login() {
     }
   };
 
-  // Присоединение для гостя (nickname обязателен)
   const handleJoinRoom = async () => {
     if (!roomCode.trim()) {
       alert("Введите код комнаты");
@@ -65,13 +54,11 @@ export default function Login() {
       alert("Введите ваше имя");
       return;
     }
-
     try {
       const res = await api.post("/rooms/join", {
         code: roomCode.trim(),
         nickname: guestNickname.trim(),
       });
-
       if (res.status === 200) {
         navigate(`/room/${roomCode.trim()}`);
       }
@@ -86,9 +73,7 @@ export default function Login() {
         nickname: nickname.trim(),
         password: password.trim(),
       });
-
       if (res.status === 200) {
-        // После входа, если есть roomCode - присоединиться
         if (roomCodeFromUrl) {
           await joinRoomAuthorized(roomCodeFromUrl);
         } else {
@@ -97,12 +82,11 @@ export default function Login() {
       } else {
         alert("Ошибка входа");
       }
-    } catch (err) {
+    } catch {
       alert("Ошибка входа");
     }
   };
 
-  // Показываем загрузку пока проверяем авторизацию
   if (isChecking) {
     return (
       <div
@@ -111,8 +95,8 @@ export default function Login() {
           justifyContent: "center",
           alignItems: "center",
           height: "100vh",
-          background: "linear-gradient(135deg, #141e30, #243b55)",
-          fontFamily: "Arial, sans-serif",
+          background: "linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%)",
+          fontFamily: "'Inter', sans-serif",
           color: "#fff",
           fontSize: "18px",
         }}
@@ -122,261 +106,6 @@ export default function Login() {
     );
   }
 
-  // Быстрый вход по ссылке (если есть room в URL)
-  if (roomCodeFromUrl) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "100vh",
-          background: "linear-gradient(135deg, #141e30, #243b55)",
-          fontFamily: "Arial, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            width: "380px",
-            background: "rgba(255, 255, 255, 0.12)",
-            backdropFilter: "blur(10px)",
-            padding: "35px",
-            borderRadius: "15px",
-            boxShadow: "0 8px 30px rgba(0,0,0,0.3)",
-            color: "#fff",
-          }}
-        >
-          {!showLogin ? (
-            <>
-              <h2
-                style={{
-                  marginBottom: "10px",
-                  fontWeight: "600",
-                  fontSize: "26px",
-                  textAlign: "center",
-                }}
-              >
-                Присоединиться к комнате
-              </h2>
-              <p
-                style={{
-                  fontSize: "14px",
-                  opacity: 0.8,
-                  textAlign: "center",
-                  marginBottom: "25px",
-                }}
-              >
-                Код: <strong style={{ letterSpacing: "2px" }}>{roomCodeFromUrl}</strong>
-              </p>
-
-              <input
-                style={{
-                  width: "100%",
-                  padding: "14px",
-                  borderRadius: "8px",
-                  marginBottom: "20px",
-                  border: "none",
-                  outline: "none",
-                  background: "rgba(255,255,255,0.15)",
-                  color: "#fff",
-                  fontSize: "15px",
-                }}
-                placeholder="Ваше имя"
-                value={guestNickname}
-                onChange={(e) => setGuestNickname(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && handleJoinRoom()}
-                autoFocus
-              />
-
-              <button
-                onClick={handleJoinRoom}
-                style={{
-                  width: "100%",
-                  padding: "14px",
-                  borderRadius: "8px",
-                  border: "none",
-                  cursor: "pointer",
-                  background: "#4a90e2",
-                  color: "#fff",
-                  fontSize: "16px",
-                  fontWeight: "600",
-                  transition: "0.3s",
-                  marginBottom: "20px",
-                }}
-                onMouseOver={(e) => (e.target.style.background = "#6bb7ff")}
-                onMouseOut={(e) => (e.target.style.background = "#4a90e2")}
-              >
-                Войти в комнату
-              </button>
-
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  marginBottom: "20px",
-                }}
-              >
-                <div
-                  style={{
-                    flex: 1,
-                    height: "1px",
-                    background: "rgba(255,255,255,0.2)",
-                  }}
-                />
-                <span
-                  style={{
-                    padding: "0 15px",
-                    fontSize: "13px",
-                    opacity: 0.7,
-                  }}
-                >
-                  или
-                </span>
-                <div
-                  style={{
-                    flex: 1,
-                    height: "1px",
-                    background: "rgba(255,255,255,0.2)",
-                  }}
-                />
-              </div>
-
-              <button
-                onClick={() => setShowLogin(true)}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: "8px",
-                  border: "1px solid rgba(255,255,255,0.3)",
-                  cursor: "pointer",
-                  background: "rgba(255,255,255,0.08)",
-                  color: "#fff",
-                  fontSize: "15px",
-                  fontWeight: "500",
-                  transition: "0.3s",
-                }}
-                onMouseOver={(e) =>
-                  (e.target.style.background = "rgba(255,255,255,0.15)")
-                }
-                onMouseOut={(e) =>
-                  (e.target.style.background = "rgba(255,255,255,0.08)")
-                }
-              >
-                Войти в аккаунт
-              </button>
-            </>
-          ) : (
-            <>
-              <h2
-                style={{
-                  marginBottom: "25px",
-                  fontWeight: "600",
-                  fontSize: "24px",
-                  textAlign: "center",
-                }}
-              >
-                Вход в аккаунт
-              </h2>
-
-              <input
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: "8px",
-                  marginBottom: "15px",
-                  border: "none",
-                  outline: "none",
-                  background: "rgba(255,255,255,0.15)",
-                  color: "#fff",
-                  fontSize: "15px",
-                }}
-                placeholder="Никнейм"
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-              />
-
-              <input
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: "8px",
-                  marginBottom: "20px",
-                  border: "none",
-                  outline: "none",
-                  background: "rgba(255,255,255,0.15)",
-                  color: "#fff",
-                  fontSize: "15px",
-                }}
-                type="password"
-                placeholder="Пароль"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && handleLogin()}
-              />
-
-              <button
-                onClick={handleLogin}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: "8px",
-                  border: "none",
-                  cursor: "pointer",
-                  background: "#4a90e2",
-                  color: "#fff",
-                  fontSize: "16px",
-                  fontWeight: "600",
-                  transition: "0.3s",
-                  marginBottom: "15px",
-                }}
-                onMouseOver={(e) => (e.target.style.background = "#6bb7ff")}
-                onMouseOut={(e) => (e.target.style.background = "#4a90e2")}
-              >
-                Войти
-              </button>
-
-              <button
-                onClick={() => setShowLogin(false)}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: "8px",
-                  border: "1px solid rgba(255,255,255,0.3)",
-                  cursor: "pointer",
-                  background: "rgba(255,255,255,0.08)",
-                  color: "#fff",
-                  fontSize: "15px",
-                  fontWeight: "500",
-                  transition: "0.3s",
-                }}
-                onMouseOver={(e) =>
-                  (e.target.style.background = "rgba(255,255,255,0.15)")
-                }
-                onMouseOut={(e) =>
-                  (e.target.style.background = "rgba(255,255,255,0.08)")
-                }
-              >
-                Назад
-              </button>
-
-              <p
-                style={{
-                  marginTop: "15px",
-                  fontSize: "13px",
-                  opacity: 0.7,
-                  textAlign: "center",
-                }}
-              >
-                После входа вы попадете в комнату
-              </p>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Обычный экран логина (без room в URL)
   return (
     <div
       style={{
@@ -384,18 +113,18 @@ export default function Login() {
         justifyContent: "center",
         alignItems: "center",
         height: "100vh",
-        background: "linear-gradient(135deg, #141e30, #243b55)",
-        fontFamily: "Arial, sans-serif",
+        background: "linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 40%, #ff6b00 120%)",
+        fontFamily: "'Inter', sans-serif",
       }}
     >
       <div
         style={{
           width: "380px",
-          background: "rgba(255, 255, 255, 0.12)",
-          backdropFilter: "blur(10px)",
+          background: "#181818",
           padding: "35px",
           borderRadius: "15px",
-          boxShadow: "0 8px 30px rgba(0,0,0,0.3)",
+          boxShadow: "0 0 15px rgba(255,115,0,0.2)",
+          border: "1px solid #2b2b2b",
           color: "#fff",
         }}
       >
@@ -407,6 +136,7 @@ export default function Login() {
                 fontWeight: "600",
                 fontSize: "26px",
                 textAlign: "center",
+                color: "#ff7300",
               }}
             >
               Присоединиться к комнате
@@ -424,13 +154,13 @@ export default function Login() {
 
             <input
               style={{
-                width: "100%",
+                width: "90%",
                 padding: "14px",
                 borderRadius: "8px",
                 marginBottom: "15px",
-                border: "none",
+                border: "1px solid #ff7300",
                 outline: "none",
-                background: "rgba(255,255,255,0.15)",
+                background: "#0f0f0f",
                 color: "#fff",
                 fontSize: "16px",
                 textAlign: "center",
@@ -443,13 +173,13 @@ export default function Login() {
 
             <input
               style={{
-                width: "100%",
+                width: "90%",
                 padding: "14px",
                 borderRadius: "8px",
                 marginBottom: "20px",
-                border: "none",
+                border: "1px solid #ff7300",
                 outline: "none",
-                background: "rgba(255,255,255,0.15)",
+                background: "#0f0f0f",
                 color: "#fff",
                 fontSize: "15px",
               }}
@@ -467,15 +197,13 @@ export default function Login() {
                 borderRadius: "8px",
                 border: "none",
                 cursor: "pointer",
-                background: "#4a90e2",
+                background: "#ff7300",
                 color: "#fff",
                 fontSize: "16px",
                 fontWeight: "600",
-                transition: "0.3s",
+                boxShadow: "0 0 10px rgba(255,115,0,0.5)",
                 marginBottom: "20px",
               }}
-              onMouseOver={(e) => (e.target.style.background = "#6bb7ff")}
-              onMouseOut={(e) => (e.target.style.background = "#4a90e2")}
             >
               Войти в комнату
             </button>
@@ -487,13 +215,7 @@ export default function Login() {
                 marginBottom: "20px",
               }}
             >
-              <div
-                style={{
-                  flex: 1,
-                  height: "1px",
-                  background: "rgba(255,255,255,0.2)",
-                }}
-              />
+              <div style={{ flex: 1, height: "1px", background: "#2b2b2b" }} />
               <span
                 style={{
                   padding: "0 15px",
@@ -503,13 +225,7 @@ export default function Login() {
               >
                 или
               </span>
-              <div
-                style={{
-                  flex: 1,
-                  height: "1px",
-                  background: "rgba(255,255,255,0.2)",
-                }}
-              />
+              <div style={{ flex: 1, height: "1px", background: "#2b2b2b" }} />
             </div>
 
             <button
@@ -518,20 +234,14 @@ export default function Login() {
                 width: "100%",
                 padding: "12px",
                 borderRadius: "8px",
-                border: "1px solid rgba(255,255,255,0.3)",
+                border: "1px solid #ff7300",
                 cursor: "pointer",
-                background: "rgba(255,255,255,0.08)",
+                background: "#1a1a1a",
                 color: "#fff",
                 fontSize: "15px",
                 fontWeight: "500",
-                transition: "0.3s",
+                marginBottom: "15px",
               }}
-              onMouseOver={(e) =>
-                (e.target.style.background = "rgba(255,255,255,0.15)")
-              }
-              onMouseOut={(e) =>
-                (e.target.style.background = "rgba(255,255,255,0.08)")
-              }
             >
               Войти в аккаунт
             </button>
@@ -565,6 +275,7 @@ export default function Login() {
                 fontWeight: "600",
                 fontSize: "24px",
                 textAlign: "center",
+                color: "#ff7300",
               }}
             >
               Вход в аккаунт
@@ -572,13 +283,13 @@ export default function Login() {
 
             <input
               style={{
-                width: "100%",
+                width: "90%",
                 padding: "12px",
                 borderRadius: "8px",
                 marginBottom: "15px",
-                border: "none",
+                border: "1px solid #ff7300",
                 outline: "none",
-                background: "rgba(255,255,255,0.15)",
+                background: "#0f0f0f",
                 color: "#fff",
                 fontSize: "15px",
               }}
@@ -589,13 +300,13 @@ export default function Login() {
 
             <input
               style={{
-                width: "100%",
+                width: "90%",
                 padding: "12px",
                 borderRadius: "8px",
                 marginBottom: "20px",
-                border: "none",
+                border: "1px solid #ff7300",
                 outline: "none",
-                background: "rgba(255,255,255,0.15)",
+                background: "#0f0f0f",
                 color: "#fff",
                 fontSize: "15px",
               }}
@@ -614,15 +325,13 @@ export default function Login() {
                 borderRadius: "8px",
                 border: "none",
                 cursor: "pointer",
-                background: "#4a90e2",
+                background: "#ff7300",
                 color: "#fff",
                 fontSize: "16px",
                 fontWeight: "600",
-                transition: "0.3s",
+                boxShadow: "0 0 10px rgba(255,115,0,0.5)",
                 marginBottom: "15px",
               }}
-              onMouseOver={(e) => (e.target.style.background = "#6bb7ff")}
-              onMouseOut={(e) => (e.target.style.background = "#4a90e2")}
             >
               Войти
             </button>
@@ -633,20 +342,14 @@ export default function Login() {
                 width: "100%",
                 padding: "12px",
                 borderRadius: "8px",
-                border: "1px solid rgba(255,255,255,0.3)",
+                border: "1px solid #ff7300",
                 cursor: "pointer",
-                background: "rgba(255,255,255,0.08)",
+                background: "#1a1a1a",
                 color: "#fff",
                 fontSize: "15px",
                 fontWeight: "500",
-                transition: "0.3s",
+                marginBottom: "15px",
               }}
-              onMouseOver={(e) =>
-                (e.target.style.background = "rgba(255,255,255,0.15)")
-              }
-              onMouseOut={(e) =>
-                (e.target.style.background = "rgba(255,255,255,0.08)")
-              }
             >
               Назад
             </button>

@@ -28,11 +28,6 @@ export default function Profile() {
 
     try {
       await api.delete("/users/me");
-      try {
-      } catch (logoutError) {
-        console.warn("Ошибка при logout (можно игнорировать):", logoutError);
-      }
-
       alert("Профиль успешно удалён.");
       navigate("/login");
     } catch (error) {
@@ -45,85 +40,108 @@ export default function Profile() {
     <div
       style={{
         height: "100vh",
-        background: "#181818",
-        color: "#E8EAED",
-        padding: "50px 20px",
-        fontFamily: "Inter, Arial, sans-serif",
+        background:
+          "linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 40%, #ff6b00 120%)",
+        color: "#fff",
         display: "flex",
         justifyContent: "center",
-        alignItems: "flex-start",
+        alignItems: "center",
+        fontFamily: "'Inter', sans-serif",
+        padding: "20px",
       }}
     >
-      <div style={{ width: "100%", maxWidth: "480px" }}>
+      <div
+        style={{
+          width: "400px",
+          background: "rgba(255, 255, 255, 0.1)",
+          backdropFilter: "blur(10px)",
+          padding: "35px",
+          borderRadius: "15px",
+          boxShadow: "0 8px 25px rgba(0,0,0,0.4)",
+          textAlign: "center",
+        }}
+      >
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
-            marginBottom: "30px",
             alignItems: "center",
+            marginBottom: "25px",
           }}
         >
-          <h1 style={{ fontSize: "24px", fontWeight: 600 }}>Профиль</h1>
-
+          <h2 style={{ fontSize: "22px", fontWeight: 600, color: "#fff" }}>
+            Профиль
+          </h2>
           <button
             onClick={() => navigate("/rooms")}
             style={{
-              padding: "10px 16px",
-              background: "#303134",
-              border: "1px solid #5f6368",
-              borderRadius: "10px",
-              color: "#E8EAED",
+              padding: "8px 14px",
+              background: "rgba(255, 255, 255, 0.15)",
+              border: "none",
+              borderRadius: "8px",
+              color: "#fff",
               cursor: "pointer",
-              transition: "0.2s",
+              fontSize: "14px",
+              transition: "0.3s",
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "#3C4043")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "#303134")}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "rgba(255, 107, 0, 0.5)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)")
+            }
           >
             ← Назад
           </button>
         </div>
 
         {!user ? (
-          <div style={{ opacity: 0.7 }}>Загрузка профиля...</div>
+          <p style={{ opacity: 0.7 }}>Загрузка профиля...</p>
         ) : (
-          <div
-            style={{
-              background: "#202124",
-              borderRadius: "14px",
-              padding: "24px",
-              border: "1px solid #2b2b2b",
-              transition: "0.2s",
-            }}
-          >
-            <p style={{ fontSize: "15px", marginBottom: "10px" }}>
-              <strong>Ник:</strong> {user.nickname}
-            </p>
-            <p style={{ fontSize: "15px", opacity: 0.85, marginBottom: "20px" }}>
-              <strong>Дата регистрации:</strong>{" "}
-              {new Date(user.created_at).toLocaleString()}
-            </p>
+          <>
+            <div
+              style={{
+                background: "rgba(255,255,255,0.08)",
+                borderRadius: "10px",
+                padding: "20px",
+                marginBottom: "25px",
+                border: "1px solid rgba(255,255,255,0.1)",
+                textAlign: "left",
+              }}
+            >
+              <p style={{ fontSize: "15px", marginBottom: "10px" }}>
+                <strong>Ник:</strong> {user.nickname}
+              </p>
+              <p style={{ fontSize: "14px", opacity: 0.85 }}>
+                <strong>Дата регистрации:</strong>{" "}
+                {new Date(user.created_at).toLocaleString()}
+              </p>
+            </div>
 
             <button
               onClick={handleDeleteProfile}
               style={{
-                padding: "10px 16px",
-                background: "#b71c1c",
+                width: "100%",
+                padding: "12px",
+                background: "#ff3b3b",
                 border: "none",
-                borderRadius: "10px",
+                borderRadius: "8px",
                 color: "#fff",
+                fontSize: "16px",
+                fontWeight: 600,
                 cursor: "pointer",
-                transition: "0.2s",
+                transition: "0.3s",
               }}
               onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "#c62828")
+                (e.currentTarget.style.background = "#ff4f1a")
               }
               onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "#b71c1c")
+                (e.currentTarget.style.background = "#ff3b3b")
               }
             >
               Удалить профиль
             </button>
-          </div>
+          </>
         )}
       </div>
     </div>
