@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 
 export default function Rooms() {
   const [rooms, setRooms] = useState([]);
-  const [joinRoomId, setJoinRoomId] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [nickname, setNickname] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
 
@@ -17,13 +18,30 @@ export default function Rooms() {
     }
   };
 
-  const joinRoom = async () => {
+  const logout = async () => {
+      await api.post("/auth/logout");
+      navigate(`/login`);
+  }
+
+  const createRoom = async () => {
     try {
-      await api.post("/rooms/join", { room_id: joinRoomId });
-      setJoinRoomId("");
-      fetchRooms();
+      const res = await api.post("/rooms", {});
+      navigate(`/room/${res.data.code}`);
     } catch {
-      alert("Ошибка присоединения");
+      alert("Ошибка создания комнаты");
+    }
+  };
+
+  const joinRoom = async () => {
+    if (!joinCode.trim()) {
+      alert("Введите код комнаты");
+      return;
+    }
+    try {
+      await api.post("/rooms/join", { code: joinCode, nickname });
+      navigate(`/room/${joinCode}`);
+    } catch (e) {
+      alert(e.response?.data?.detail || "Ошибка присоединения");
     }
   };
 
@@ -58,7 +76,7 @@ export default function Rooms() {
           alignItems: "center",
         }}
       >
-        <h1 style={{ fontWeight: "700", fontSize: "28px" }}>SERGEY LOX</h1>
+        <h1 style={{ fontWeight: "700", fontSize: "28px" }}>MEETS</h1>
 
         <div style={{ position: "relative" }}>
           <button
@@ -87,14 +105,19 @@ export default function Rooms() {
               style={{
                 position: "absolute",
                 right: 0,
-                top: "40px",
+                top: "50px",
                 background: "#3c4043",
                 borderRadius: "9px",
                 overflow: "hidden",
                 boxShadow: "0 9px 19px rgba(0,0,0,0.3)",
+                zIndex: 10,
               }}
             >
               <button
+                onClick={() => {
+                  createRoom();
+                  setMenuOpen(false);
+                }}
                 style={{
                   padding: "16px 30px",
                   width: "100%",
@@ -105,12 +128,15 @@ export default function Rooms() {
                   cursor: "pointer",
                 }}
               >
-                Новая встреча
+                Новая комната
               </button>
               <button
-                onClick={() => navigate("/profile")}
+                onClick={() => {
+                  navigate("/profile");
+                  setMenuOpen(false);
+                }}
                 style={{
-                  padding: "10px 20px",
+                  padding: "16px 30px",
                   width: "100%",
                   background: "none",
                   border: "none",
@@ -121,6 +147,23 @@ export default function Rooms() {
               >
                 Профиль
               </button>
+              <button
+                onClick={() => {
+                  logout();
+                  setMenuOpen(false);
+                }}
+                style={{
+                  padding: "16px 30px",
+                  width: "100%",
+                  background: "none",
+                  border: "none",
+                  color: "#fff",
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
+                Выйти
+              </button>
             </div>
           )}
         </div>
@@ -128,42 +171,56 @@ export default function Rooms() {
 
       <div
         style={{
-          maxWidth: "500px",
+          maxWidth: "600px",
           margin: "0 auto",
           padding: "20px",
           background: "#303134",
           borderRadius: "12px",
-          display: "flex",
-          gap: "12px",
         }}
       >
-        <input
-          style={{
-            flex: 1,
-            padding: "12px",
-            borderRadius: "8px",
-            border: "1px solid #555",
-            background: "#3c4043",
-            color: "#fff",
-          }}
-          placeholder="Введите ID комнаты"
-          value={joinRoomId}
-          onChange={(e) => setJoinRoomId(e.target.value)}
-        />
-        <button
-          style={{
-            padding: "12px 15px",
-            borderRadius: "8px",
-            border: "none",
-            background: "#1a73e8",
-            color: "white",
-            cursor: "pointer",
-            fontWeight: "600",
-          }}
-          onClick={joinRoom}
-        >
-          Войти
-        </button>
+        <h3 style={{ marginBottom: "15px", fontSize: "16px", fontWeight: "500" }}>
+          Присоединиться к комнате
+        </h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <input
+            style={{
+              padding: "12px",
+              borderRadius: "8px",
+              border: "1px solid #555",
+              background: "#3c4043",
+              color: "#fff",
+            }}
+            placeholder="Код комнаты (xxx-xxx-xxx)"
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value)}
+          />
+          <input
+            style={{
+              padding: "12px",
+              borderRadius: "8px",
+              border: "1px solid #555",
+              background: "#3c4043",
+              color: "#fff",
+            }}
+            placeholder="Ваше имя (опционально)"
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+          />
+          <button
+            style={{
+              padding: "12px 15px",
+              borderRadius: "8px",
+              border: "none",
+              background: "#1a73e8",
+              color: "white",
+              cursor: "pointer",
+              fontWeight: "600",
+            }}
+            onClick={joinRoom}
+          >
+            Войти
+          </button>
+        </div>
       </div>
 
       <div
@@ -173,42 +230,61 @@ export default function Rooms() {
           margin: "40px auto 0",
         }}
       >
-        <ul style={{ listStyle: "none", padding: 0 }}>
-          {rooms.map((room) => (
-            <li
-              key={room.room_id}
-              style={{
-                background: "#3c4043",
-                padding: "14px",
-                marginBottom: "10px",
-                borderRadius: "10px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <span>
-                {room.name || "Без имени"}
-                <span style={{ opacity: 0.7 }}> (ID: {room.room_id})</span>
-              </span>
-
-              <button
+        <h3 style={{ marginBottom: "15px", fontSize: "18px", fontWeight: "500" }}>
+          Мои комнаты
+        </h3>
+        {rooms.length === 0 ? (
+          <p style={{ textAlign: "center", opacity: 0.6, marginTop: "30px" }}>
+            У вас нет созданных комнат
+          </p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0 }}>
+            {rooms.map((room) => (
+              <li
+                key={room.id}
                 style={{
-                  padding: "6px 10px",
-                  background: "#d93025",
-                  borderRadius: "6px",
-                  color: "#fff",
-                  border: "none",
-                  cursor: "pointer",
-                  fontSize: "13px",
+                  background: "#3c4043",
+                  padding: "14px",
+                  marginBottom: "10px",
+                  borderRadius: "10px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
                 }}
-                onClick={() => deleteRoom(room.room_id)}
               >
-                Удалить
-              </button>
-            </li>
-          ))}
-        </ul>
+                <div
+                  style={{ cursor: "pointer", flex: 1 }}
+                  onClick={() => navigate(`/room/${room.code}`)}
+                >
+                  <div style={{ fontWeight: "600", marginBottom: "4px" }}>
+                    Комната {room.code}
+                  </div>
+                  <div style={{ fontSize: "13px", opacity: 0.7 }}>
+                    Создана: {new Date(room.created_at).toLocaleString("ru-RU")}
+                  </div>
+                </div>
+
+                <button
+                  style={{
+                    padding: "6px 10px",
+                    background: "#d93025",
+                    borderRadius: "6px",
+                    color: "#fff",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteRoom(room.id);
+                  }}
+                >
+                  Удалить
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
