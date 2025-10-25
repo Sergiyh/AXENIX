@@ -29,7 +29,7 @@ export default function Rooms() {
       return;
     }
     try {
-      data = await api.post("/rooms/join", { code: joinCode, nickname });
+      const data = await api.post("/rooms/join", { code: joinCode, nickname });
       navigate(`/room/${joinCode}`);
     } catch (e) {
       alert(e.response?.data?.detail || "Ошибка присоединения");
@@ -50,7 +50,6 @@ export default function Rooms() {
       const res = await api.post("/rooms", {});
       const roomCode = res.data.code;
       const data = await api.post("/rooms/join", { code: roomCode, nickname: "" });
-
       navigate(`/room/${roomCode}`);
     } catch (e) {
       console.error(e);
@@ -81,17 +80,18 @@ export default function Rooms() {
         fontFamily: "Arial, sans-serif",
       }}
     >
+      {/* Header с бургер-меню слева и заголовком по центру */}
       <div
         style={{
-          display: "flex",
-          justifyContent: "space-between",
+          position: "relative",
           marginBottom: "90px",
+          display: "flex",
           alignItems: "center",
+          justifyContent: "center",
         }}
       >
-        <h1 style={{ fontWeight: "700", fontSize: "28px" }}>AXENIX MEET</h1>
-
-        <div style={{ position: "relative" }}>
+        {/* Бургер-меню слева */}
+        <div style={{ position: "absolute", left: 0 }}>
           <button
             onClick={() => setMenuOpen(!menuOpen)}
             style={{
@@ -108,22 +108,44 @@ export default function Rooms() {
               padding: "7px",
             }}
           >
-            <span style={{ width: "26px", height: "4px", background: "#fff", borderRadius: "2px" }}></span>
-            <span style={{ width: "26px", height: "4px", background: "#fff", borderRadius: "2px" }}></span>
-            <span style={{ width: "26px", height: "4px", background: "#fff", borderRadius: "2px" }}></span>
+            <span
+              style={{
+                width: "26px",
+                height: "4px",
+                background: "#fff",
+                borderRadius: "2px",
+              }}
+            ></span>
+            <span
+              style={{
+                width: "26px",
+                height: "4px",
+                background: "#fff",
+                borderRadius: "2px",
+              }}
+            ></span>
+            <span
+              style={{
+                width: "26px",
+                height: "4px",
+                background: "#fff",
+                borderRadius: "2px",
+              }}
+            ></span>
           </button>
 
           {menuOpen && (
             <div
               style={{
                 position: "absolute",
-                right: 0,
+                left: 0,
                 top: "50px",
                 background: "#3c4043",
-                borderRadius: "9px",
+                borderRadius: "12px",
                 overflow: "hidden",
                 boxShadow: "0 9px 19px rgba(0,0,0,0.3)",
                 zIndex: 10,
+                width: "180px",
               }}
             >
               <button
@@ -132,16 +154,20 @@ export default function Rooms() {
                   setMenuOpen(false);
                 }}
                 style={{
-                  padding: "16px 30px",
+                  padding: "16px 20px",
                   width: "100%",
                   background: "none",
                   border: "none",
                   color: "#fff",
                   textAlign: "left",
                   cursor: "pointer",
+                  fontSize: "14px",
+                  transition: "background 0.2s",
                 }}
+                onMouseEnter={(e) => (e.target.style.background = "#555")}
+                onMouseLeave={(e) => (e.target.style.background = "none")}
               >
-                Новая комната
+                📹 Новая комната
               </button>
               <button
                 onClick={() => {
@@ -149,16 +175,20 @@ export default function Rooms() {
                   setMenuOpen(false);
                 }}
                 style={{
-                  padding: "16px 30px",
+                  padding: "16px 20px",
                   width: "100%",
                   background: "none",
                   border: "none",
                   color: "#fff",
                   textAlign: "left",
                   cursor: "pointer",
+                  fontSize: "14px",
+                  transition: "background 0.2s",
                 }}
+                onMouseEnter={(e) => (e.target.style.background = "#555")}
+                onMouseLeave={(e) => (e.target.style.background = "none")}
               >
-                Профиль
+                👤 Профиль
               </button>
               <button
                 onClick={() => {
@@ -166,29 +196,46 @@ export default function Rooms() {
                   setMenuOpen(false);
                 }}
                 style={{
-                  padding: "16px 30px",
+                  padding: "16px 20px",
                   width: "100%",
                   background: "none",
                   border: "none",
                   color: "#fff",
                   textAlign: "left",
                   cursor: "pointer",
+                  fontSize: "14px",
+                  transition: "background 0.2s",
                 }}
+                onMouseEnter={(e) => (e.target.style.background = "#555")}
+                onMouseLeave={(e) => (e.target.style.background = "none")}
               >
-                Выйти
+                🚪 Выйти
               </button>
             </div>
           )}
         </div>
+
+        {/* Заголовок по центру */}
+        <h1
+          style={{
+            fontWeight: "700",
+            fontSize: "28px",
+            margin: 0,
+            textAlign: "center",
+          }}
+        >
+          AXENIX MEET
+        </h1>
       </div>
 
+      {/* Присоединиться к комнате */}
       <div
         style={{
           maxWidth: "600px",
           margin: "0 auto",
-          padding: "20px",
+          padding: "25px",
           background: "#303134",
-          borderRadius: "12px",
+          borderRadius: "19px",
         }}
       >
         <h3 style={{ marginBottom: "15px", fontSize: "16px", fontWeight: "500" }}>
@@ -202,10 +249,16 @@ export default function Rooms() {
               border: "1px solid #555",
               background: "#3c4043",
               color: "#fff",
+              outline: "none",
             }}
             placeholder="Код комнаты (xxx-xxx-xxx)"
             value={joinCode}
             onChange={(e) => setJoinCode(e.target.value)}
+            onKeyPress={(e) => {
+              if (e.key === "Enter") {
+                joinRoom();
+              }
+            }}
           />
           <button
             style={{
@@ -216,14 +269,18 @@ export default function Rooms() {
               color: "white",
               cursor: "pointer",
               fontWeight: "600",
+              transition: "background 0.2s",
             }}
             onClick={joinRoom}
+            onMouseEnter={(e) => (e.target.style.background = "#1557b0")}
+            onMouseLeave={(e) => (e.target.style.background = "#1a73e8")}
           >
             Войти
           </button>
         </div>
       </div>
 
+      {/* Мои комнаты */}
       <div
         style={{
           marginTop: "40px",
@@ -261,7 +318,13 @@ export default function Rooms() {
                     Создана: {new Date(room.created_at).toLocaleString("ru-RU")}
                   </div>
                   {!room.is_active && (
-                    <div style={{ fontSize: "13px", color: "#d93025", marginTop: "4px" }}>
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        color: "#d93025",
+                        marginTop: "4px",
+                      }}
+                    >
                       Комната закрыта
                     </div>
                   )}
@@ -278,11 +341,14 @@ export default function Rooms() {
                         border: "none",
                         cursor: "pointer",
                         fontSize: "13px",
+                        transition: "background 0.2s",
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
                         joinExistingRoom(room.code);
                       }}
+                      onMouseEnter={(e) => (e.target.style.background = "#1557b0")}
+                      onMouseLeave={(e) => (e.target.style.background = "#1a73e8")}
                     >
                       Присоединиться
                     </button>
@@ -297,11 +363,16 @@ export default function Rooms() {
                       border: "none",
                       cursor: "pointer",
                       fontSize: "13px",
+                      transition: "background 0.2s",
                     }}
                     onClick={(e) => {
                       e.stopPropagation();
-                      deleteRoom(room.id);
+                      if (window.confirm("Вы уверены, что хотите удалить комнату?")) {
+                        deleteRoom(room.id);
+                      }
                     }}
+                    onMouseEnter={(e) => (e.target.style.background = "#b52818")}
+                    onMouseLeave={(e) => (e.target.style.background = "#d93025")}
                   >
                     Удалить
                   </button>
