@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import VideoCallChat from '../components/VideoCallChat';
 
 export default function Room() {
   const { id } = useParams();
@@ -21,6 +22,9 @@ export default function Room() {
   const [remotePeers, setRemotePeers] = useState({});
   const [peerMediaStatus, setPeerMediaStatus] = useState({});
 
+
+  const [isChatOpen, setIsChatOpen] = useState(false)
+  
   // Новые состояния для устройств
   const [audioDevices, setAudioDevices] = useState([]);
   const [videoDevices, setVideoDevices] = useState([]);
@@ -901,6 +905,12 @@ export default function Room() {
         `}
       </style>
 
+            <VideoCallChat
+          roomCode={room.code}
+          isOpen={isChatOpen}
+          onToggle={() => setIsChatOpen(!isChatOpen)}
+            />
+
       {/* Header */}
       <div
         style={{
@@ -1426,6 +1436,7 @@ export default function Room() {
                     </option>
                   ))}
                 </select>
+
               </div>
             </div>
           )}
@@ -1537,6 +1548,7 @@ function RemoteVideo({ stream, peerToken, audioOn, videoOn }) {
           🔇
         </div>
       )}
+    
     </div>
   );
 }

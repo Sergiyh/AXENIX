@@ -1,12 +1,27 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../api/client";
 import { useNavigate } from "react-router-dom";
 
 export default function JoinByLink() {
   const [inviteLink, setInviteLink] = useState("");
+  const [nickname, setNickname] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(null);
   const navigate = useNavigate();
+
+  // Проверяем авторизован ли пользователь
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        await api.get("/users/me");
+        setIsAuthenticated(true);
+      } catch {
+        setIsAuthenticated(false);
+      }
+    };
+    checkAuth();
+  }, []);
 
   const handleJoin = async () => {
     if (!inviteLink.trim()) {
@@ -19,18 +34,21 @@ export default function JoinByLink() {
 
     try {
       const url = new URL(inviteLink);
-      const roomId = url.pathname.split("/").pop(); // берём ID комнаты из ссылки
-      const res = await api.post(`/rooms/join`, { room_id: roomId });
+      const code = url.pathname.split("/").pop(); // берём код комнаты из ссылки
 
-      if (res.data?.room_id) {
-        navigate(`/rooms/${res.data.room_id}`);
-      } else {
-        setError("Не удалось войти в комнату. Проверьте ссылку.");
-      }
+      const payload = {
+        code: code,
+        nickname: "fast_login",
+      };
+
+      await api.post(`/rooms/join`, payload);
+      navigate(`/room/${code}`);
     } catch (err) {
       console.error(err);
       if (err.response?.status === 404) {
         setError("Комната не найдена. Проверьте ссылку-приглашение.");
+      } else if (err.response?.status === 400) {
+        setError(err.response?.data?.detail || "Неверная ссылка на комнату.");
       } else {
         setError("Произошла ошибка при подключении. Попробуйте снова.");
       }
@@ -38,6 +56,24 @@ export default function JoinByLink() {
       setLoading(false);
     }
   };
+
+  if (isAuthenticated === null) {
+    return (
+      <div
+        style={{
+          height: "100vh",
+          background: "linear-gradient(160deg, #0f0f0f, #1a0a00)",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          color: "#fff",
+          fontFamily: "Inter, Arial, sans-serif",
+        }}
+      >
+        <p>Загрузка...</p>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -73,9 +109,9 @@ export default function JoinByLink() {
           type="text"
           value={inviteLink}
           onChange={(e) => setInviteLink(e.target.value)}
-          placeholder="https://app.site/rooms/12345"
+          placeholder="https://app.site/room/abc-def-ghi"
           style={{
-            width: "90%",
+            width: "100%",
             padding: "10px 14px",
             borderRadius: "8px",
             border: "1px solid #444",
@@ -83,8 +119,11 @@ export default function JoinByLink() {
             color: "#fff",
             fontSize: "14px",
             marginBottom: "15px",
+            boxSizing: "border-box",
           }}
         />
+
+        
 
         {error && (
           <div
@@ -111,7 +150,7 @@ export default function JoinByLink() {
             color: "#fff",
             border: "none",
             borderRadius: "8px",
-            cursor: "pointer",
+            cursor: loading ? "not-allowed" : "pointer",
             fontSize: "15px",
             transition: "0.2s",
           }}
