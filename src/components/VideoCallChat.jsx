@@ -536,36 +536,11 @@ export default function VideoCallChat({ roomCode, isOpen, onToggle }) {
               Чат комнаты
             </h3>
             <p style={{ margin: 0, fontSize: '12px', opacity: 0.7, color: '#fff' }}>
-              {userCount} {userCount === 1 ? 'участник' : 'участников'} • {cryptoReady ? 'Зашифровано' : 'Инициализация...'}
+              • {cryptoReady ? 'Зашифровано' : 'Инициализация...'}
             </p>
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button
-            onClick={() => setIsMinimized(!isMinimized)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: '20px',
-              padding: '4px 8px',
-              borderRadius: '8px',
-              opacity: 0.7,
-              transition: 'all 0.2s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
-              e.currentTarget.style.opacity = '1';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.opacity = '0.7';
-            }}
-            title={isMinimized ? 'Развернуть' : 'Свернуть'}
-          >
-            {isMinimized ? '▲' : '▼'}
-          </button>
           <button
             onClick={onToggle}
             style={{
