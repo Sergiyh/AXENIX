@@ -24,11 +24,9 @@ export default function Room() {
   const [speakingStatus, setSpeakingStatus] = useState({});
   const [handRaised, setHandRaised] = useState({});
   const [isHost, setIsHost] = useState(false);
-  const [participants, setParticipants] = useState({});
-  const [connectionStatus, setConnectionStatus] = useState("connected");
 
-  const [unreadCount, setUnreadCount] = useState(0);  
-  const [isChatOpen, setIsChatOpen] = useState(false)
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [showParticipantsPanel, setShowParticipantsPanel] = useState(false);
   
   // Новые состояния для устройств
   const [audioDevices, setAudioDevices] = useState([]);
@@ -43,25 +41,7 @@ export default function Room() {
   const wsRef = useRef(null);
   const peerConnectionsRef = useRef({});
 
-  // Для анализа аудио
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const audioDataRef = useRef(null);
-  const animationFrameRef = useRef(null);
-
-  // Для восстановления соединения
-  const reconnectTimeoutRef = useRef(null);
-  const reconnectAttemptsRef = useRef(0);
-  const maxReconnectAttempts = 5;
-  const reconnectDelay = 2000;
-
-  // Локальное состояние для восстановления
-  const localStateRef = useRef({
-    audioOn: true,
-    videoOn: true,
-    handRaised: false,
-    screenSharing: false
-  });
+  // Убраны рефы для анализа аудио, так как индикаторы говорящего больше не нужны
 
   const iceServers = {
     iceServers: [
@@ -70,121 +50,60 @@ export default function Room() {
     ],
   };
 
-  // Функция восстановления соединения
-  const reconnect = async () => {
-    if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
-      setError("Не удалось восстановить соединение. Пожалуйста, перезайдите в комнату.");
-      return;
-    }
-
-    setConnectionStatus("reconnecting");
-    reconnectAttemptsRef.current++;
-
-    console.log(`Попытка переподключения ${reconnectAttemptsRef.current}/${maxReconnectAttempts}`);
-
-    try {
-      await initWebSocketConnection();
-      reconnectAttemptsRef.current = 0;
-      setConnectionStatus("connected");
-    } catch (error) {
-      console.error("Ошибка переподключения:", error);
-      reconnectTimeoutRef.current = setTimeout(reconnect, reconnectDelay * reconnectAttemptsRef.current);
-    }
+  // Функция для генерации аватарок по имени
+  const getAvatarColor = (name) => {
+    const colors = [
+      "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", 
+      "#DDA0DD", "#98D8C8", "#F7DC6F", "#BB8FCE", "#85C1E9"
+    ];
+    const index = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
+    return colors[index];
   };
 
-  // Инициализация WebSocket соединения
-  const initWebSocketConnection = async () => {
-    return new Promise((resolve, reject) => {
-      try {
-        const baseURL = api.defaults.baseURL;
-        const host = baseURL.split("//")[1];
-        const protocol = baseURL.startsWith("https") ? "wss:" : "ws:";
-
-        const token = localStorage.getItem("token_room");
-
-        const wsUrl = token
-          ? `${protocol}//${host}/ws/room/${id}?token=${encodeURIComponent(token)}&reconnect=true`
-          : `${protocol}//${host}/ws/room/${id}?reconnect=true`;
-
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-
-        const connectionTimeout = setTimeout(() => {
-          if (ws.readyState !== WebSocket.OPEN) {
-            ws.close();
-            reject(new Error("Timeout подключения"));
-          }
-        }, 10000);
-
-        ws.onopen = () => {
-          clearTimeout(connectionTimeout);
-          console.log("WebSocket соединение установлено");
-          
-          // Восстанавливаем локальное состояние
-          restoreLocalState();
-          resolve();
-        };
-
-        ws.onmessage = (event) => {
-          handleWSMessage(event, localStreamRef.current);
-        };
-
-        ws.onerror = (e) => {
-          clearTimeout(connectionTimeout);
-          console.error("WebSocket ошибка:", e);
-          reject(e);
-        };
-
-        ws.onclose = (event) => {
-          clearTimeout(connectionTimeout);
-          
-          if (!event.wasClean && connectionStatus !== "reconnecting") {
-            console.log("Соединение разорвано, пытаемся переподключиться...");
-            reconnect();
-          }
-        };
-      } catch (error) {
-        reject(error);
-      }
-    });
+  const getInitials = (name) => {
+    return name.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2);
   };
 
-  // Восстановление локального состояния после переподключения
-  const restoreLocalState = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      // Восстанавливаем статус медиа
-      broadcastMediaStatus(localStateRef.current.audioOn, localStateRef.current.videoOn);
-      
-      // Восстанавливаем статус поднятой руки
-      if (localStateRef.current.handRaised) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: "hand_raised",
-            isRaised: true,
-            restore: true
-          })
-        );
-      }
-
-      // Запрашиваем актуальное состояние комнаты
-      wsRef.current.send(
-        JSON.stringify({
-          type: "get_room_state"
-        })
-      );
-
-      console.log("Локальное состояние восстановлено");
-    }
-  };
-
-  // Сохранение локального состояния
-  const saveLocalState = () => {
-    localStateRef.current = {
+  // Получаем список всех участников для панели
+  const getAllParticipants = () => {
+    const participantsList = [];
+    
+    // Добавляем локального пользователя
+    const localUserName = guestNickname || "Вы";
+    participantsList.push({
+      id: 'local',
+      name: localUserName,
+      isLocal: true,
+      isOnline: true,
       audioOn: isAudioOn,
       videoOn: isVideoOn,
-      handRaised: handRaised.local || false,
-      screenSharing: isScreenSharing
-    };
+      isSpeaking: speakingStatus.local,
+      handRaised: handRaised.local,
+      isHost: isHost,
+      avatarColor: getAvatarColor(localUserName),
+      initials: getInitials(localUserName)
+    });
+    
+    // Добавляем удаленных участников
+    Object.keys(remotePeers).forEach(peerToken => {
+      const mediaStatus = peerMediaStatus[peerToken] || { audioOn: true, videoOn: true };
+      const participantName = `Участник ${peerToken.substring(0, 6)}`;
+      participantsList.push({
+        id: peerToken,
+        name: participantName,
+        isLocal: false,
+        isOnline: true,
+        audioOn: mediaStatus.audioOn,
+        videoOn: mediaStatus.videoOn,
+        isSpeaking: speakingStatus[peerToken],
+        handRaised: handRaised[peerToken],
+        isHost: false,
+        avatarColor: getAvatarColor(participantName),
+        initials: getInitials(participantName)
+      });
+    });
+    
+    return participantsList;
   };
 
   useEffect(() => {
@@ -200,20 +119,6 @@ export default function Room() {
     };
 
     checkAuth();
-
-    // Сохраняем состояние перед закрытием/перезагрузкой
-    const handleBeforeUnload = () => {
-      saveLocalState();
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-    };
   }, []);
 
   const joinRoomAuthorized = async () => {
@@ -272,6 +177,12 @@ export default function Room() {
       const res = await api.get(`/rooms/${id}`);
       setRoom(res.data);
       
+      // Проверяем, является ли пользователь создателем комнаты
+      const currentUserToken = localStorage.getItem("token_room");
+      if (res.data.creator_token === currentUserToken) {
+        setIsHost(true);
+      }
+      
       // После получения данных комнаты инициализируем медиа и WebSocket
       await initMediaAndWebSocket();
     } catch (e) {
@@ -295,7 +206,6 @@ export default function Room() {
           audio: true,
         });
         setIsVideoOn(true);
-        localStateRef.current.videoOn = true;
       } catch (err) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
@@ -303,7 +213,6 @@ export default function Room() {
             audio: true,
           });
           setIsVideoOn(false);
-          localStateRef.current.videoOn = false;
         } catch (audioErr) {
           throw new Error("Не удалось получить доступ к микрофону");
         }
@@ -311,10 +220,7 @@ export default function Room() {
 
       localStreamRef.current = stream;
 
-      // Инициализируем анализатор аудио
-      if (stream.getAudioTracks().length > 0) {
-        initAudioAnalyser(stream);
-      }
+      // УБРАНА инициализация анализатора аудио, так как индикаторы говорящего больше не нужны
 
       setTimeout(() => {
         if (localVideoRef.current && stream) {
@@ -330,250 +236,52 @@ export default function Room() {
     }
   };
 
-  // Функция для инициализации анализатора аудио
-  const initAudioAnalyser = (stream) => {
-    if (!stream.getAudioTracks().length) return;
-
-    try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const analyser = audioContext.createAnalyser();
-      const microphone = audioContext.createMediaStreamSource(stream);
-      
-      analyser.fftSize = 256;
-      microphone.connect(analyser);
-      
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      
-      audioContextRef.current = audioContext;
-      analyserRef.current = analyser;
-      audioDataRef.current = dataArray;
-      
-      startSpeakingDetection();
-    } catch (error) {
-      console.error("Ошибка инициализации анализатора аудио:", error);
-    }
-  };
-
-  // Функция для обнаружения речи
-  const startSpeakingDetection = () => {
-    if (!analyserRef.current || !audioDataRef.current) return;
-
-    const checkSpeaking = () => {
-      analyserRef.current.getByteFrequencyData(audioDataRef.current);
-      
-      // Вычисляем средний уровень громкости
-      const average = audioDataRef.current.reduce((a, b) => a + b) / audioDataRef.current.length;
-      
-      // Порог для определения речи
-      const isSpeaking = average > 30;
-      
-      // Обновляем статус только если он изменился
-      setSpeakingStatus(prev => {
-        if (prev.local !== isSpeaking) {
-          // Отправляем статус другим участникам
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(
-              JSON.stringify({
-                type: "speaking_status",
-                isSpeaking: isSpeaking,
-              })
-            );
-          }
-          return { ...prev, local: isSpeaking };
-        }
-        return prev;
-      });
-      
-      animationFrameRef.current = requestAnimationFrame(checkSpeaking);
-    };
-    
-    animationFrameRef.current = requestAnimationFrame(checkSpeaking);
-  };
-
-  // Функция для остановки анализа аудио
-  const stopAudioAnalyser = () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-    }
-  };
-
-  const toggleHandRaise = () => {
-    const newHandRaised = !handRaised.local;
-    setHandRaised(prev => ({ ...prev, local: newHandRaised }));
-    localStateRef.current.handRaised = newHandRaised;
-    
-    // Отправляем статус другим участникам
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "hand_raised",
-          isRaised: newHandRaised,
-        })
-      );
-    }
-  };
-
-  // Получение списка устройств
-  const getMediaDevices = async () => {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      
-      const audioInputs = devices.filter((d) => d.kind === "audioinput");
-      const videoInputs = devices.filter((d) => d.kind === "videoinput");
-
-      setAudioDevices(audioInputs);
-      setVideoDevices(videoInputs);
-
-      if (audioInputs.length > 0 && !selectedAudioDevice) {
-        setSelectedAudioDevice(audioInputs[0].deviceId);
-      }
-      if (videoInputs.length > 0 && !selectedVideoDevice) {
-        setSelectedVideoDevice(videoInputs[0].deviceId);
-      }
-    } catch (err) {
-      console.error("Ошибка получения устройств:", err);
-    }
-  };
-
-  // Переключение устройства
-  const switchDevice = async (deviceId, type) => {
-    if (!localStreamRef.current) return;
-
-    try {
-      const constraints = {
-        audio: type === "audio" ? { deviceId: { exact: deviceId } } : true,
-        video: type === "video" ? { deviceId: { exact: deviceId } } : true,
-      };
-
-      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-
-      // Заменяем треки в текущем стриме
-      if (type === "audio") {
-        const oldAudioTrack = localStreamRef.current.getAudioTracks()[0];
-        const newAudioTrack = newStream.getAudioTracks()[0];
-        
-        if (oldAudioTrack) {
-          localStreamRef.current.removeTrack(oldAudioTrack);
-          oldAudioTrack.stop();
-        }
-        localStreamRef.current.addTrack(newAudioTrack);
-
-        // Обновляем треки в peer connections
-        Object.values(peerConnectionsRef.current).forEach((pc) => {
-          const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
-          if (sender) {
-            sender.replaceTrack(newAudioTrack);
-          }
-        });
-
-        setSelectedAudioDevice(deviceId);
-      } else if (type === "video") {
-        const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
-        const newVideoTrack = newStream.getVideoTracks()[0];
-
-        if (oldVideoTrack) {
-          localStreamRef.current.removeTrack(oldVideoTrack);
-          oldVideoTrack.stop();
-        }
-        localStreamRef.current.addTrack(newVideoTrack);
-
-        // Обновляем видео элемент
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = localStreamRef.current;
-        }
-
-        // Обновляем треки в peer connections
-        Object.values(peerConnectionsRef.current).forEach((pc) => {
-          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
-          if (sender) {
-            sender.replaceTrack(newVideoTrack);
-          }
-        });
-
-        setSelectedVideoDevice(deviceId);
-      }
-    } catch (err) {
-      console.error("Ошибка переключения устройства:", err);
-      setError("Не удалось переключить устройство");
-    }
-  };
-
-  // Демонстрация экрана
-  const toggleScreenShare = async () => {
-    if (isScreenSharing) {
-      // Останавливаем демонстрацию
-      if (screenStreamRef.current) {
-        screenStreamRef.current.getTracks().forEach((track) => track.stop());
-        screenStreamRef.current = null;
-      }
-
-      // Возвращаем камеру
-      const videoTrack = localStreamRef.current.getVideoTracks()[0];
-      if (videoTrack) {
-        Object.values(peerConnectionsRef.current).forEach((pc) => {
-          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
-          if (sender) {
-            sender.replaceTrack(videoTrack);
-          }
-        });
-
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = localStreamRef.current;
-        }
-      }
-
-      setIsScreenSharing(false);
-      localStateRef.current.screenSharing = false;
-    } else {
-      // Начинаем демонстрацию
+  // Инициализация WebSocket соединения
+  const initWebSocketConnection = async () => {
+    return new Promise((resolve, reject) => {
       try {
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            cursor: "always",
-            displaySurface: "monitor",
-          },
-          audio: false,
-        });
+        const baseURL = api.defaults.baseURL;
+        const host = baseURL.split("//")[1];
+        const protocol = baseURL.startsWith("https") ? "wss:" : "ws:";
 
-        screenStreamRef.current = screenStream;
-        const screenTrack = screenStream.getVideoTracks()[0];
+        const token = localStorage.getItem("token_room");
 
-        // Заменяем видео трек на screen share для всех peer connections
-        Object.values(peerConnectionsRef.current).forEach((pc) => {
-          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
-          if (sender) {
-            sender.replaceTrack(screenTrack);
+        const wsUrl = token
+          ? `${protocol}//${host}/ws/room/${id}?token=${encodeURIComponent(token)}`
+          : `${protocol}//${host}/ws/room/${id}`;
+
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        const connectionTimeout = setTimeout(() => {
+          if (ws.readyState !== WebSocket.OPEN) {
+            ws.close();
+            reject(new Error("Timeout подключения"));
           }
-        });
+        }, 10000);
 
-        // Показываем screen share локально
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = screenStream;
-        }
-
-        // Обработка остановки через браузерную кнопку
-        screenTrack.onended = () => {
-          toggleScreenShare();
+        ws.onopen = () => {
+          clearTimeout(connectionTimeout);
+          resolve();
         };
 
-        setIsScreenSharing(true);
-        localStateRef.current.screenSharing = true;
-      } catch (err) {
-        console.error("Ошибка демонстрации экрана:", err);
-        setError("Не удалось запустить демонстрацию экрана");
-      }
-    }
-  };
+        ws.onmessage = (event) => {
+          handleWSMessage(event, localStreamRef.current);
+        };
 
-  useEffect(() => {
-    if (localStreamRef.current && localVideoRef.current) {
-      localVideoRef.current.srcObject = localStreamRef.current;
-    }
-  }, [room]);
+        ws.onerror = (e) => {
+          clearTimeout(connectionTimeout);
+          reject(e);
+        };
+
+        ws.onclose = (event) => {
+          clearTimeout(connectionTimeout);
+        };
+      } catch (error) {
+        reject(error);
+      }
+    });
+  };
 
   const handleWSMessage = async (event, localStream) => {
     try {
@@ -581,7 +289,6 @@ export default function Room() {
 
       switch (data.type) {
         case "active_peers":
-          // Восстанавливаем соединения с активными пирами
           data.peers.forEach((peerToken) => {
             if (!peerConnectionsRef.current[peerToken]) {
               createPeerConnection(peerToken, localStream, true);
@@ -632,45 +339,6 @@ export default function Room() {
             [data.from]: data.isRaised,
           }));
           break;
-          
-        case "user_role":
-          if (data.userToken === localStorage.getItem("token_room")) {
-            setIsHost(data.isHost);
-          }
-          break;
-
-        case "room_state":
-          // Восстанавливаем полное состояние комнаты
-          if (data.participants) {
-            setParticipants(data.participants);
-            
-            // Восстанавливаем статусы участников
-            const newMediaStatus = {};
-            const newSpeakingStatus = {};
-            const newHandRaised = {};
-            
-            data.participants.forEach(participant => {
-              if (participant.mediaStatus) {
-                newMediaStatus[participant.token] = participant.mediaStatus;
-              }
-              if (participant.speaking !== undefined) {
-                newSpeakingStatus[participant.token] = participant.speaking;
-              }
-              if (participant.handRaised !== undefined) {
-                newHandRaised[participant.token] = participant.handRaised;
-              }
-            });
-            
-            setPeerMediaStatus(newMediaStatus);
-            setSpeakingStatus(newSpeakingStatus);
-            setHandRaised(newHandRaised);
-          }
-          break;
-
-        case "reconnect_success":
-          console.log("Успешное переподключение, состояние восстановлено");
-          setConnectionStatus("connected");
-          break;
 
         default:
       }
@@ -681,7 +349,6 @@ export default function Room() {
 
   const createPeerConnection = (peerToken, localStream, initiator) => {
     try {
-      // Закрываем существующее соединение если есть
       if (peerConnectionsRef.current[peerToken]) {
         peerConnectionsRef.current[peerToken].close();
       }
@@ -712,25 +379,6 @@ export default function Room() {
             })
           );
         }
-      };
-
-      pc.oniceconnectionstatechange = () => {
-        const state = pc.iceConnectionState;
-        console.log(`Peer ${peerToken} ICE state:`, state);
-        
-        if (state === "disconnected" || state === "failed") {
-          console.log(`Соединение с ${peerToken} разорвано, пытаемся восстановить...`);
-          // Пытаемся восстановить соединение
-          setTimeout(() => {
-            if (pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "checking") {
-              createPeerConnection(peerToken, localStream, true);
-            }
-          }, 2000);
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        console.log(`Peer ${peerToken} connection state:`, pc.connectionState);
       };
 
       if (initiator) {
@@ -840,11 +488,6 @@ export default function Room() {
   };
 
   const stopMediaAndCleanup = () => {
-    // Останавливаем переподключение
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
-
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
         track.stop();
@@ -866,10 +509,7 @@ export default function Room() {
 
     if (wsRef.current) {
       const ws = wsRef.current;
-      if (
-        ws.readyState === WebSocket.OPEN ||
-        ws.readyState === WebSocket.CONNECTING
-      ) {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }
       wsRef.current = null;
@@ -879,12 +519,25 @@ export default function Room() {
       localVideoRef.current.srcObject = null;
     }
 
-    stopAudioAnalyser();
-
     setRemotePeers({});
     setPeerMediaStatus({});
     setSpeakingStatus({});
     setHandRaised({});
+  };
+
+  const toggleHandRaise = () => {
+    const newHandRaised = !handRaised.local;
+    setHandRaised(prev => ({ ...prev, local: newHandRaised }));
+    
+    // Отправляем статус другим участникам
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "hand_raised",
+          isRaised: newHandRaised,
+        })
+      );
+    }
   };
 
   const toggleAudio = () => {
@@ -894,7 +547,6 @@ export default function Room() {
         audioTrack.enabled = !audioTrack.enabled;
         const newAudioState = audioTrack.enabled;
         setIsAudioOn(newAudioState);
-        localStateRef.current.audioOn = newAudioState;
 
         broadcastMediaStatus(newAudioState, isVideoOn);
       }
@@ -908,7 +560,6 @@ export default function Room() {
         videoTrack.enabled = !videoTrack.enabled;
         const newVideoState = videoTrack.enabled;
         setIsVideoOn(newVideoState);
-        localStateRef.current.videoOn = newVideoState;
 
         broadcastMediaStatus(isAudioOn, newVideoState);
       }
@@ -929,6 +580,146 @@ export default function Room() {
     }
   };
 
+  // Получение списка устройств
+  const getMediaDevices = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      
+      const audioInputs = devices.filter((d) => d.kind === "audioinput");
+      const videoInputs = devices.filter((d) => d.kind === "videoinput");
+
+      setAudioDevices(audioInputs);
+      setVideoDevices(videoInputs);
+
+      if (audioInputs.length > 0 && !selectedAudioDevice) {
+        setSelectedAudioDevice(audioInputs[0].deviceId);
+      }
+      if (videoInputs.length > 0 && !selectedVideoDevice) {
+        setSelectedVideoDevice(videoInputs[0].deviceId);
+      }
+    } catch (err) {
+      console.error("Ошибка получения устройств:", err);
+    }
+  };
+
+  // Переключение устройства
+  const switchDevice = async (deviceId, type) => {
+    if (!localStreamRef.current) return;
+
+    try {
+      const constraints = {
+        audio: type === "audio" ? { deviceId: { exact: deviceId } } : true,
+        video: type === "video" ? { deviceId: { exact: deviceId } } : true,
+      };
+
+      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      if (type === "audio") {
+        const oldAudioTrack = localStreamRef.current.getAudioTracks()[0];
+        const newAudioTrack = newStream.getAudioTracks()[0];
+        
+        if (oldAudioTrack) {
+          localStreamRef.current.removeTrack(oldAudioTrack);
+          oldAudioTrack.stop();
+        }
+        localStreamRef.current.addTrack(newAudioTrack);
+
+        Object.values(peerConnectionsRef.current).forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
+          if (sender) {
+            sender.replaceTrack(newAudioTrack);
+          }
+        });
+
+        setSelectedAudioDevice(deviceId);
+      } else if (type === "video") {
+        const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+        const newVideoTrack = newStream.getVideoTracks()[0];
+
+        if (oldVideoTrack) {
+          localStreamRef.current.removeTrack(oldVideoTrack);
+          oldVideoTrack.stop();
+        }
+        localStreamRef.current.addTrack(newVideoTrack);
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = localStreamRef.current;
+        }
+
+        Object.values(peerConnectionsRef.current).forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+          if (sender) {
+            sender.replaceTrack(newVideoTrack);
+          }
+        });
+
+        setSelectedVideoDevice(deviceId);
+      }
+    } catch (err) {
+      console.error("Ошибка переключения устройства:", err);
+      setError("Не удалось переключить устройство");
+    }
+  };
+
+  // Демонстрация экрана
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) {
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((track) => track.stop());
+        screenStreamRef.current = null;
+      }
+
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        Object.values(peerConnectionsRef.current).forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+          if (sender) {
+            sender.replaceTrack(videoTrack);
+          }
+        });
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = localStreamRef.current;
+        }
+      }
+
+      setIsScreenSharing(false);
+    } else {
+      try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            cursor: "always",
+            displaySurface: "monitor",
+          },
+          audio: false,
+        });
+
+        screenStreamRef.current = screenStream;
+        const screenTrack = screenStream.getVideoTracks()[0];
+
+        Object.values(peerConnectionsRef.current).forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+          if (sender) {
+            sender.replaceTrack(screenTrack);
+          }
+        });
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = screenStream;
+        }
+
+        screenTrack.onended = () => {
+          toggleScreenShare();
+        };
+
+        setIsScreenSharing(true);
+      } catch (err) {
+        console.error("Ошибка демонстрации экрана:", err);
+        setError("Не удалось запустить демонстрацию экрана");
+      }
+    }
+  };
+
   const copyRoomLink = () => {
     const link = `${window.location.origin}/room/${id}`;
     navigator.clipboard.writeText(link);
@@ -944,13 +735,7 @@ export default function Room() {
 
   const hasVideoTrack = localStreamRef.current?.getVideoTracks().length > 0;
 
-  // Ручное переподключение
-  const manualReconnect = () => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
-    reconnect();
-  };
+  const participantsList = getAllParticipants();
 
   if (needsAuth) {
     return (
@@ -1244,89 +1029,18 @@ export default function Room() {
         `}
       </style>
 
-      {/* Индикатор статуса соединения */}
-      {connectionStatus !== "connected" && (
-        <div
-          style={{
-            position: "fixed",
-            top: "20px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: connectionStatus === "reconnecting" 
-              ? "rgba(255, 152, 0, 0.9)" 
-              : "rgba(244, 67, 54, 0.9)",
-            backdropFilter: "blur(10px)",
-            padding: "12px 24px",
-            borderRadius: "12px",
-            color: "#fff",
-            fontSize: "14px",
-            fontWeight: "600",
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            zIndex: 10000,
-            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.3)",
-            border: "1px solid rgba(255, 255, 255, 0.2)",
-          }}
-        >
-          {connectionStatus === "reconnecting" ? (
-            <>
-              <div
-                style={{
-                  width: "16px",
-                  height: "16px",
-                  border: "2px solid #fff",
-                  borderTop: "2px solid transparent",
-                  borderRadius: "50%",
-                  animation: "spin 1s linear infinite",
-                }}
-              />
-              <span>Переподключение... ({reconnectAttemptsRef.current}/{maxReconnectAttempts})</span>
-              <button
-                onClick={manualReconnect}
-                style={{
-                  background: "rgba(255, 255, 255, 0.2)",
-                  border: "none",
-                  borderRadius: "6px",
-                  color: "#fff",
-                  padding: "4px 8px",
-                  fontSize: "12px",
-                  cursor: "pointer",
-                  marginLeft: "10px",
-                }}
-              >
-                Ускорить
-              </button>
-            </>
-          ) : (
-            <>
-              <span>❌ Соединение прервано</span>
-              <button
-                onClick={manualReconnect}
-                style={{
-                  background: "rgba(255, 255, 255, 0.2)",
-                  border: "none",
-                  borderRadius: "6px",
-                  color: "#fff",
-                  padding: "4px 8px",
-                  fontSize: "12px",
-                  cursor: "pointer",
-                  marginLeft: "10px",
-                }}
-              >
-                Переподключить
-              </button>
-            </>
-          )}
-        </div>
+      {/* Панель участников */}
+      {showParticipantsPanel && (
+        <ParticipantsPanel
+          participants={participantsList}
+          onClose={() => setShowParticipantsPanel(false)}
+        />
       )}
 
-       <VideoCallChat 
-        roomCode={id} 
-        isOpen={isChatOpen} 
+      <VideoCallChat
+        roomCode={room.code}
+        isOpen={isChatOpen}
         onToggle={() => setIsChatOpen(!isChatOpen)}
-        unreadCount={unreadCount}
-        setUnreadCount={setUnreadCount}
       />
 
       {/* Header */}
@@ -1355,12 +1069,50 @@ export default function Room() {
             {room.name}
           </h1>
           <p style={{ margin: 0, fontSize: "13px", opacity: 0.7 }}>
-            {Object.keys(remotePeers).length + 1} участник(ов)
-            {connectionStatus !== "connected" && " • Соединение..."}
+            {participantsList.length} участник(ов) онлайн
           </p>
         </div>
 
         <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
+          {/* Кнопка панели участников */}
+          <button
+            onClick={() => setShowParticipantsPanel(!showParticipantsPanel)}
+            style={{
+              padding: "10px 20px",
+              background: showParticipantsPanel
+                ? "linear-gradient(135deg, #ff9800 0%, #ff5722 100%)"
+                : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+              border: "none",
+              borderRadius: "12px",
+              color: "#fff",
+              cursor: "pointer",
+              fontSize: "14px",
+              fontWeight: "600",
+              transition: "all 0.3s",
+              boxShadow: showParticipantsPanel
+                ? "0 4px 15px rgba(255, 152, 0, 0.4)"
+                : "0 4px 15px rgba(102, 126, 234, 0.4)",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = "translateY(-2px)";
+              e.target.style.boxShadow = showParticipantsPanel
+                ? "0 6px 20px rgba(255, 152, 0, 0.5)"
+                : "0 6px 20px rgba(102, 126, 234, 0.5)";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = "translateY(0)";
+              e.target.style.boxShadow = showParticipantsPanel
+                ? "0 4px 15px rgba(255, 152, 0, 0.4)"
+                : "0 4px 15px rgba(102, 126, 234, 0.4)";
+            }}
+          >
+            <span>👥</span>
+            {showParticipantsPanel ? "Закрыть список" : "Участники"}
+          </button>
+
           <div
             style={{
               display: "flex",
@@ -1568,37 +1320,14 @@ export default function Room() {
             </div>
           )}
 
-          {/* Индикатор говорящего для локального видео */}
-          {speakingStatus.local && (
-            <div
-              style={{
-                position: "absolute",
-                top: "15px",
-                left: "15px",
-                width: "40px",
-                height: "40px",
-                borderRadius: "50%",
-                background: "rgba(76, 175, 80, 0.9)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "20px",
-                animation: "pulse 1s ease-in-out infinite",
-                border: "2px solid #fff",
-                zIndex: 10,
-              }}
-              title="Вы говорите"
-            >
-              🎤
-            </div>
-          )}
+          {/* УБРАН индикатор говорящего для локального видео */}
 
           {/* Индикатор поднятой руки для локального видео */}
           {handRaised.local && (
             <div
               style={{
                 position: "absolute",
-                top: speakingStatus.local ? "65px" : "15px",
+                top: "15px",
                 left: "15px",
                 width: "40px",
                 height: "40px",
@@ -1635,11 +1364,10 @@ export default function Room() {
               border: "1px solid rgba(255, 255, 255, 0.1)",
             }}
           >
-            <span>Вы</span>
+            <span>Вы {isHost && "(👑 Создатель)"}</span>
             {isScreenSharing && <span style={{ color: "#38ef7d" }}>🖥️</span>}
             {!isVideoOn && <span style={{ opacity: 0.6 }}>📵</span>}
             {!isAudioOn && <span style={{ opacity: 0.6 }}>🔇</span>}
-            {isHost && <span style={{ color: "#ffeb3b" }}>👑</span>}
           </div>
         </div>
 
@@ -1649,6 +1377,7 @@ export default function Room() {
             audioOn: true,
             videoOn: true,
           };
+          
           return (
             <RemoteVideo
               key={peerToken}
@@ -1656,9 +1385,7 @@ export default function Room() {
               peerToken={peerToken}
               audioOn={mediaStatus.audioOn}
               videoOn={mediaStatus.videoOn}
-              isSpeaking={speakingStatus[peerToken]}
               isHandRaised={handRaised[peerToken]}
-              connectionStatus={connectionStatus}
             />
           );
         })}
@@ -1945,8 +1672,194 @@ export default function Room() {
   );
 }
 
-// Remote Video Component
-function RemoteVideo({ stream, peerToken, audioOn, videoOn, isSpeaking, isHandRaised, connectionStatus }) {
+// Компонент панели участников
+function ParticipantsPanel({ participants, onClose }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: "0",
+        right: "0",
+        width: "350px",
+        height: "100vh",
+        background: "rgba(20, 20, 30, 0.95)",
+        backdropFilter: "blur(20px)",
+        borderLeft: "1px solid rgba(255, 255, 255, 0.1)",
+        zIndex: 1000,
+        display: "flex",
+        flexDirection: "column",
+        boxShadow: "-10px 0 50px rgba(0, 0, 0, 0.5)",
+      }}
+    >
+      {/* Заголовок панели */}
+      <div
+        style={{
+          padding: "20px",
+          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+          color: "#fff",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <div>
+          <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "600" }}>
+            👥 Участники
+          </h3>
+          <p style={{ margin: "5px 0 0", fontSize: "12px", opacity: 0.8 }}>
+            {participants.length} онлайн
+          </p>
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            background: "rgba(255, 255, 255, 0.2)",
+            border: "none",
+            borderRadius: "8px",
+            color: "#fff",
+            width: "32px",
+            height: "32px",
+            cursor: "pointer",
+            fontSize: "16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Список участников */}
+      <div
+        style={{
+          flex: 1,
+          overflow: "auto",
+          padding: "20px",
+        }}
+      >
+        {participants.map((participant) => (
+          <div
+            key={participant.id}
+            style={{
+              background: "rgba(255, 255, 255, 0.05)",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              borderRadius: "12px",
+              padding: "15px",
+              marginBottom: "10px",
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              transition: "all 0.3s",
+            }}
+          >
+            {/* Аватар */}
+            <div
+              style={{
+                width: "44px",
+                height: "44px",
+                borderRadius: "50%",
+                background: participant.avatarColor,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#fff",
+                fontWeight: "600",
+                fontSize: "16px",
+                position: "relative",
+              }}
+            >
+              {participant.initials}
+              
+              {/* Индикатор онлайн статуса */}
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: "2px",
+                  right: "2px",
+                  width: "12px",
+                  height: "12px",
+                  borderRadius: "50%",
+                  background: participant.isOnline ? "#4CAF50" : "#f44336",
+                  border: "2px solid rgba(20, 20, 30, 0.95)",
+                }}
+              />
+            </div>
+
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                <span style={{ fontWeight: "600", fontSize: "14px" }}>
+                  {participant.name}
+                </span>
+                {participant.isHost && (
+                  <span style={{ 
+                    background: "rgba(255, 193, 7, 0.2)", 
+                    color: "#ffc107",
+                    padding: "2px 6px",
+                    borderRadius: "4px",
+                    fontSize: "10px",
+                    fontWeight: "600"
+                  }}>
+                    СОЗДАТЕЛЬ
+                  </span>
+                )}
+              </div>
+              
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", opacity: 0.7 }}>
+                {/* Индикатор микрофона */}
+                {participant.isSpeaking ? (
+                  <span style={{ color: "#4caf50", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <div style={{
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "50%",
+                      background: "#4caf50",
+                      animation: "pulse 1s ease-in-out infinite"
+                    }} />
+                    Говорит
+                  </span>
+                ) : participant.audioOn ? (
+                  <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    🎤 Включен
+                  </span>
+                ) : (
+                  <span style={{ display: "flex", alignItems: "center", gap: "4px", opacity: 0.5 }}>
+                    🔇 Выключен
+                  </span>
+                )}
+
+                {/* Индикатор поднятой руки */}
+                {participant.handRaised && (
+                  <span style={{ color: "#ff9800", display: "flex", alignItems: "center", gap: "4px" }}>
+                    ✋ Рука поднята
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Статистика */}
+      <div
+        style={{
+          padding: "15px 20px",
+          background: "rgba(0, 0, 0, 0.3)",
+          borderTop: "1px solid rgba(255, 255, 255, 0.1)",
+          fontSize: "12px",
+          opacity: 0.7,
+        }}
+      >
+        <div>Всего участников: {participants.length}</div>
+        <div>Говорят: {participants.filter(p => p.isSpeaking).length}</div>
+        <div>Подняли руку: {participants.filter(p => p.handRaised).length}</div>
+      </div>
+    </div>
+  );
+}
+
+// Remote Video Component - УБРАН индикатор говорящего
+function RemoteVideo({ stream, peerToken, audioOn, videoOn, isHandRaised }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -2004,37 +1917,14 @@ function RemoteVideo({ stream, peerToken, audioOn, videoOn, isSpeaking, isHandRa
         </div>
       )}
 
-      {/* Индикатор говорящего */}
-      {isSpeaking && (
-        <div
-          style={{
-            position: "absolute",
-            top: "15px",
-            left: "15px",
-            width: "40px",
-            height: "40px",
-            borderRadius: "50%",
-            background: "rgba(76, 175, 80, 0.9)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: "20px",
-            animation: "pulse 1s ease-in-out infinite",
-            border: "2px solid #fff",
-            zIndex: 10,
-          }}
-          title="Говорит"
-        >
-          🎤
-        </div>
-      )}
+      {/* УБРАН индикатор говорящего */}
 
       {/* Индикатор поднятой руки */}
       {isHandRaised && (
         <div
           style={{
             position: "absolute",
-            top: isSpeaking ? "65px" : "15px",
+            top: "15px",
             left: "15px",
             width: "40px",
             height: "40px",
@@ -2051,30 +1941,6 @@ function RemoteVideo({ stream, peerToken, audioOn, videoOn, isSpeaking, isHandRa
           title="Поднял руку"
         >
           ✋
-        </div>
-      )}
-
-      {/* Индикатор проблем с соединением */}
-      {connectionStatus !== "connected" && (
-        <div
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            background: "rgba(0, 0, 0, 0.8)",
-            backdropFilter: "blur(10px)",
-            padding: "12px 20px",
-            borderRadius: "10px",
-            color: "#fff",
-            fontSize: "14px",
-            fontWeight: "600",
-            textAlign: "center",
-            border: "1px solid rgba(255, 255, 255, 0.2)",
-          }}
-        >
-          <div style={{ marginBottom: "8px" }}>🔄</div>
-          <div>Переподключение...</div>
         </div>
       )}
 

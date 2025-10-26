@@ -303,10 +303,14 @@ export default function VideoCallChat({ roomCode, isOpen, onToggle }) {
 
         // Сортируем сообщения по времени
         setMessages(sortMessages(decryptedMessages));
+
+        console.log("получены сообщения")
         
         // Устанавливаем ID последнего сообщения
         if (decryptedMessages.length > 0) {
+          console.log("lastMsg сообщения")
           const lastMsg = decryptedMessages[decryptedMessages.length - 1];
+          console.log("lastMsg ", lastMsg)
           setLastMessageId(lastMsg.id);
         }
       }
