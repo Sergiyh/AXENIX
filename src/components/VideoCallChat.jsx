@@ -208,35 +208,63 @@ export default function VideoCallChat({ roomCode, isOpen, onToggle }) {
       if (response.data) {
         const data = response.data;
         
-        if (data.messages && data.messages.length > 0) {
-          // Расшифровываем сообщения
-          const decryptedMessages = await Promise.all(
-            data.messages.map(async (msg) => {
-              try {
-                const decryptedText = decryptMessage(msg.text, privateKey);
-                return { ...msg, text: decryptedText };
-              } catch (error) {
-                console.error('Failed to decrypt message:', error);
-                return { ...msg, text: '[Ошибка расшифровки]' };
-              }
-            })
-          );
-          
-          // Добавляем новые сообщения и сортируем
-          setMessages(prev => sortMessages([...prev, ...decryptedMessages]));
-          setLastMessageId(data.last_message_id);
-        }
-        
+        // Обновляем количество пользователей
         if (data.user_count !== undefined) {
           setUserCount(data.user_count);
         }
 
-        if (data.notifications && data.notifications.length > 0) {
+        // Обрабатываем новые сообщения
+        if (data.messages && data.messages.length > 0) {
+          if (isOpen) {
+            // ✅ ЧАТ ОТКРЫТ - добавляем новые сообщения в список
+            console.log('📥 Получены новые сообщения, добавляем в открытый чат');
+            
+            const decryptedNewMessages = data.messages.map((msg) => {
+              try {
+                const decryptedText = decryptMessage(msg.text, privateKey);
+                return {
+                  ...msg,
+                  text: decryptedText,
+                };
+              } catch (error) {
+                console.error('Failed to decrypt message:', error);
+                return {
+                  ...msg,
+                  text: '[Ошибка расшифровки]',
+                };
+              }
+            });
+
+            // Добавляем новые сообщения и сортируем весь список
+            setMessages(prevMessages => {
+              // Фильтруем дубликаты по ID
+              const existingIds = new Set(prevMessages.map(m => m.id));
+              const uniqueNewMessages = decryptedNewMessages.filter(m => !existingIds.has(m.id));
+              
+              if (uniqueNewMessages.length > 0) {
+                const combined = [...prevMessages, ...uniqueNewMessages];
+                return sortMessages(combined);
+              }
+              return prevMessages;
+            });
+
+            // Обновляем last_message_id на последнее полученное сообщение
+            const lastMsg = data.messages[data.messages.length - 1];
+            if (lastMsg && lastMsg.id) {
+              setLastMessageId(lastMsg.id);
+            }
+          } else {
+            // ✅ ЧАТ ЗАКРЫТ - НЕ обновляем сообщения, только уведомление
+            console.log('🔔 Чат закрыт, показываем уведомление');
+          }
+        }
+
+        // Показываем browser notification только если чат закрыт
+        if (!isOpen && data.notifications && data.notifications.length > 0) {
           data.notifications.forEach(notification => {
             console.log('Notification:', notification);
             
-            // ✅ Показываем browser notification только если чат закрыт
-            if (!isOpen && 'Notification' in window && Notification.permission === 'granted') {
+            if ('Notification' in window && Notification.permission === 'granted') {
               new Notification('Новое сообщение в чате', {
                 body: notification.text || 'У вас новое сообщение',
                 icon: '/favicon.ico',
@@ -289,53 +317,33 @@ export default function VideoCallChat({ roomCode, isOpen, onToggle }) {
     }
   };
 
-  // ✅ Polling в фоне когда чат ЗАКРЫТ (для уведомлений)
+  // ✅ ЕДИНЫЙ Polling - работает ВСЕГДА (и когда чат открыт, и когда закрыт)
   useEffect(() => {
-    if (isOpen || !cryptoReady || !roomCode) {
-      // Если чат открыт - останавливаем фоновый polling
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-        console.log('🔴 Фоновый polling остановлен (чат открыт)');
-      }
-      return;
-    }
+    if (!cryptoReady || !roomCode) return;
 
-    // Запускаем фоновый polling только когда чат закрыт
-    console.log('🟢 Фоновый polling запущен (чат закрыт)');
-    const startBackgroundPolling = async () => {
+    console.log('🟢 Polling запущен (чат', isOpen ? 'открыт' : 'закрыт', ')');
+    
+    const startPolling = async () => {
       await pollMessages();
-      pollingRef.current = setInterval(pollMessages, 3000);
+      // Каждые 2 секунды проверяем новые сообщения
+      pollingRef.current = setInterval(pollMessages, 2000);
     };
 
-    startBackgroundPolling();
+    startPolling();
 
     return () => {
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
         pollingRef.current = null;
-        console.log('🔴 Фоновый polling остановлен (cleanup)');
+        console.log('🔴 Polling остановлен');
       }
     };
-  }, [isOpen, cryptoReady, roomCode, lastMessageId, publicKey, privateKey]);
+  }, [cryptoReady, roomCode]); // УБРАЛ lastMessageId, publicKey, privateKey из зависимостей!
 
-  // Load history and start polling when chat opens
+  // Load history when chat opens
   useEffect(() => {
     if (isOpen && roomCode && cryptoReady) {
       loadMessageHistory();
-      
-      const startPolling = () => {
-        pollMessages();
-        pollingRef.current = setInterval(pollMessages, 3000);
-      };
-
-      startPolling();
-
-      return () => {
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-        }
-      };
     }
   }, [isOpen, roomCode, cryptoReady]);
 
@@ -345,25 +353,10 @@ export default function VideoCallChat({ roomCode, isOpen, onToggle }) {
     if (!newMessage.trim() || !roomCode || !cryptoReady) return;
 
     const messageText = newMessage.trim();
+    setNewMessage(''); // Очищаем сразу
     
     try {
       console.log('Encrypting message with server public key (PKCS#1 v1.5)...');
-      
-      // Создаем временное сообщение для мгновенного отображения
-      const tempMessage = {
-        id: `temp-${Date.now()}`,
-        text: messageText,
-        user_nickname: 'Вы',
-        send_at: new Date().toISOString(),
-        message_type: 'text',
-        is_filtered: false,
-        filtered_reason: null,
-        pending: true, // Флаг для визуального отличия
-      };
-      
-      // Сразу добавляем сообщение в UI
-      setMessages(prev => sortMessages([...prev, tempMessage]));
-      setNewMessage('');
       
       // Шифруем сообщение публичным ключом сервера
       const encryptedText = encryptMessage(messageText, serverPublicKey);
@@ -379,36 +372,12 @@ export default function VideoCallChat({ roomCode, isOpen, onToggle }) {
 
       console.log('Message sent successfully', response.data);
       
-      // Заменяем временное сообщение на реальное от сервера
-      if (response.data) {
-        setMessages(prev => {
-          // Удаляем временное сообщение
-          const withoutTemp = prev.filter(msg => msg.id !== tempMessage.id);
-          
-          // Расшифровываем ответ от сервера
-          let serverMessage = response.data;
-          try {
-            serverMessage.text = decryptMessage(response.data.text, privateKey);
-          } catch (error) {
-            console.error('Failed to decrypt server response:', error);
-            serverMessage.text = messageText; // Используем оригинальный текст
-          }
-          
-          // Добавляем реальное сообщение и сортируем
-          return sortMessages([...withoutTemp, serverMessage]);
-        });
-        
-        // Обновляем lastMessageId
-        setLastMessageId(response.data.id);
-      }
+      // Сообщение автоматически придет через polling
       
     } catch (error) {
       console.error('Failed to send message:', error);
       
-      // Удаляем временное сообщение при ошибке
-      setMessages(prev => prev.filter(msg => !msg.pending));
-      
-      // Возвращаем текст обратно в поле ввода
+      // Возвращаем текст обратно в поле ввода при ошибке
       setNewMessage(messageText);
       
       alert('Не удалось отправить сообщение: ' + error.message);
@@ -678,7 +647,6 @@ export default function VideoCallChat({ roomCode, isOpen, onToggle }) {
                 flexDirection: 'column',
                 gap: '4px',
                 animation: 'fadeIn 0.3s ease-out',
-                opacity: message.pending ? 0.6 : 1,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
@@ -702,17 +670,6 @@ export default function VideoCallChat({ roomCode, isOpen, onToggle }) {
                     minute: '2-digit',
                   })}
                 </span>
-                {message.pending && (
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      opacity: 0.5,
-                      fontStyle: 'italic',
-                    }}
-                  >
-                    отправка...
-                  </span>
-                )}
               </div>
               <div
                 style={{
@@ -721,9 +678,7 @@ export default function VideoCallChat({ roomCode, isOpen, onToggle }) {
                   padding: '10px 14px',
                   maxWidth: '85%',
                   wordBreak: 'break-word',
-                  border: message.pending 
-                    ? '1px dashed rgba(255, 255, 255, 0.2)'
-                    : '1px solid rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.05)',
                 }}
               >
                 <p

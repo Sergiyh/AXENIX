@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import VideoCallChat from "../components/VideoCallChat"
+import VideoCallChat from '../components/VideoCallChat';
 
 export default function Room() {
   const { id } = useParams();
@@ -21,8 +21,15 @@ export default function Room() {
 
   const [remotePeers, setRemotePeers] = useState({});
   const [peerMediaStatus, setPeerMediaStatus] = useState({});
+  const [speakingStatus, setSpeakingStatus] = useState({});
+  const [handRaised, setHandRaised] = useState({});
+  const [isHost, setIsHost] = useState(false);
+  const [participants, setParticipants] = useState({});
+  const [connectionStatus, setConnectionStatus] = useState("connected");
 
-  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);  
+  const [isChatOpen, setIsChatOpen] = useState(false)
+  
   // Новые состояния для устройств
   const [audioDevices, setAudioDevices] = useState([]);
   const [videoDevices, setVideoDevices] = useState([]);
@@ -36,11 +43,148 @@ export default function Room() {
   const wsRef = useRef(null);
   const peerConnectionsRef = useRef({});
 
+  // Для анализа аудио
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const audioDataRef = useRef(null);
+  const animationFrameRef = useRef(null);
+
+  // Для восстановления соединения
+  const reconnectTimeoutRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
+  const maxReconnectAttempts = 5;
+  const reconnectDelay = 2000;
+
+  // Локальное состояние для восстановления
+  const localStateRef = useRef({
+    audioOn: true,
+    videoOn: true,
+    handRaised: false,
+    screenSharing: false
+  });
+
   const iceServers = {
     iceServers: [
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
     ],
+  };
+
+  // Функция восстановления соединения
+  const reconnect = async () => {
+    if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
+      setError("Не удалось восстановить соединение. Пожалуйста, перезайдите в комнату.");
+      return;
+    }
+
+    setConnectionStatus("reconnecting");
+    reconnectAttemptsRef.current++;
+
+    console.log(`Попытка переподключения ${reconnectAttemptsRef.current}/${maxReconnectAttempts}`);
+
+    try {
+      await initWebSocketConnection();
+      reconnectAttemptsRef.current = 0;
+      setConnectionStatus("connected");
+    } catch (error) {
+      console.error("Ошибка переподключения:", error);
+      reconnectTimeoutRef.current = setTimeout(reconnect, reconnectDelay * reconnectAttemptsRef.current);
+    }
+  };
+
+  // Инициализация WebSocket соединения
+  const initWebSocketConnection = async () => {
+    return new Promise((resolve, reject) => {
+      try {
+        const baseURL = api.defaults.baseURL;
+        const host = baseURL.split("//")[1];
+        const protocol = baseURL.startsWith("https") ? "wss:" : "ws:";
+
+        const token = localStorage.getItem("token_room");
+
+        const wsUrl = token
+          ? `${protocol}//${host}/ws/room/${id}?token=${encodeURIComponent(token)}&reconnect=true`
+          : `${protocol}//${host}/ws/room/${id}?reconnect=true`;
+
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        const connectionTimeout = setTimeout(() => {
+          if (ws.readyState !== WebSocket.OPEN) {
+            ws.close();
+            reject(new Error("Timeout подключения"));
+          }
+        }, 10000);
+
+        ws.onopen = () => {
+          clearTimeout(connectionTimeout);
+          console.log("WebSocket соединение установлено");
+          
+          // Восстанавливаем локальное состояние
+          restoreLocalState();
+          resolve();
+        };
+
+        ws.onmessage = (event) => {
+          handleWSMessage(event, localStreamRef.current);
+        };
+
+        ws.onerror = (e) => {
+          clearTimeout(connectionTimeout);
+          console.error("WebSocket ошибка:", e);
+          reject(e);
+        };
+
+        ws.onclose = (event) => {
+          clearTimeout(connectionTimeout);
+          
+          if (!event.wasClean && connectionStatus !== "reconnecting") {
+            console.log("Соединение разорвано, пытаемся переподключиться...");
+            reconnect();
+          }
+        };
+      } catch (error) {
+        reject(error);
+      }
+    });
+  };
+
+  // Восстановление локального состояния после переподключения
+  const restoreLocalState = () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // Восстанавливаем статус медиа
+      broadcastMediaStatus(localStateRef.current.audioOn, localStateRef.current.videoOn);
+      
+      // Восстанавливаем статус поднятой руки
+      if (localStateRef.current.handRaised) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "hand_raised",
+            isRaised: true,
+            restore: true
+          })
+        );
+      }
+
+      // Запрашиваем актуальное состояние комнаты
+      wsRef.current.send(
+        JSON.stringify({
+          type: "get_room_state"
+        })
+      );
+
+      console.log("Локальное состояние восстановлено");
+    }
+  };
+
+  // Сохранение локального состояния
+  const saveLocalState = () => {
+    localStateRef.current = {
+      audioOn: isAudioOn,
+      videoOn: isVideoOn,
+      handRaised: handRaised.local || false,
+      screenSharing: isScreenSharing
+    };
   };
 
   useEffect(() => {
@@ -56,6 +200,20 @@ export default function Room() {
     };
 
     checkAuth();
+
+    // Сохраняем состояние перед закрытием/перезагрузкой
+    const handleBeforeUnload = () => {
+      saveLocalState();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
   }, []);
 
   const joinRoomAuthorized = async () => {
@@ -72,7 +230,7 @@ export default function Room() {
       }
 
       setNeedsAuth(false);
-      fetchRoom();
+      await fetchRoom();
     } catch (err) {
       setJoinError(err.response?.data?.detail || "Ошибка входа в комнату");
       setIsJoining(false);
@@ -102,7 +260,7 @@ export default function Room() {
       }
 
       setNeedsAuth(false);
-      fetchRoom();
+      await fetchRoom();
     } catch (err) {
       setJoinError(err.response?.data?.detail || "Ошибка входа в комнату");
       setIsJoining(false);
@@ -113,8 +271,149 @@ export default function Room() {
     try {
       const res = await api.get(`/rooms/${id}`);
       setRoom(res.data);
+      
+      // После получения данных комнаты инициализируем медиа и WebSocket
+      await initMediaAndWebSocket();
     } catch (e) {
       setError("Комната не найдена или доступ запрещен");
+    }
+  };
+
+  // Объединенная функция инициализации медиа и WebSocket
+  const initMediaAndWebSocket = async () => {
+    try {
+      // Получаем список устройств
+      await getMediaDevices();
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: true,
+        });
+        setIsVideoOn(true);
+        localStateRef.current.videoOn = true;
+      } catch (err) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: false,
+            audio: true,
+          });
+          setIsVideoOn(false);
+          localStateRef.current.videoOn = false;
+        } catch (audioErr) {
+          throw new Error("Не удалось получить доступ к микрофону");
+        }
+      }
+
+      localStreamRef.current = stream;
+
+      // Инициализируем анализатор аудио
+      if (stream.getAudioTracks().length > 0) {
+        initAudioAnalyser(stream);
+      }
+
+      setTimeout(() => {
+        if (localVideoRef.current && stream) {
+          localVideoRef.current.srcObject = stream;
+        }
+      }, 200);
+
+      // Инициализируем WebSocket соединение
+      await initWebSocketConnection();
+
+    } catch (e) {
+      setError(e.message || "Ошибка инициализации");
+    }
+  };
+
+  // Функция для инициализации анализатора аудио
+  const initAudioAnalyser = (stream) => {
+    if (!stream.getAudioTracks().length) return;
+
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const analyser = audioContext.createAnalyser();
+      const microphone = audioContext.createMediaStreamSource(stream);
+      
+      analyser.fftSize = 256;
+      microphone.connect(analyser);
+      
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      
+      audioContextRef.current = audioContext;
+      analyserRef.current = analyser;
+      audioDataRef.current = dataArray;
+      
+      startSpeakingDetection();
+    } catch (error) {
+      console.error("Ошибка инициализации анализатора аудио:", error);
+    }
+  };
+
+  // Функция для обнаружения речи
+  const startSpeakingDetection = () => {
+    if (!analyserRef.current || !audioDataRef.current) return;
+
+    const checkSpeaking = () => {
+      analyserRef.current.getByteFrequencyData(audioDataRef.current);
+      
+      // Вычисляем средний уровень громкости
+      const average = audioDataRef.current.reduce((a, b) => a + b) / audioDataRef.current.length;
+      
+      // Порог для определения речи
+      const isSpeaking = average > 30;
+      
+      // Обновляем статус только если он изменился
+      setSpeakingStatus(prev => {
+        if (prev.local !== isSpeaking) {
+          // Отправляем статус другим участникам
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(
+              JSON.stringify({
+                type: "speaking_status",
+                isSpeaking: isSpeaking,
+              })
+            );
+          }
+          return { ...prev, local: isSpeaking };
+        }
+        return prev;
+      });
+      
+      animationFrameRef.current = requestAnimationFrame(checkSpeaking);
+    };
+    
+    animationFrameRef.current = requestAnimationFrame(checkSpeaking);
+  };
+
+  // Функция для остановки анализа аудио
+  const stopAudioAnalyser = () => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+    }
+  };
+
+  const toggleHandRaise = () => {
+    const newHandRaised = !handRaised.local;
+    setHandRaised(prev => ({ ...prev, local: newHandRaised }));
+    localStateRef.current.handRaised = newHandRaised;
+    
+    // Отправляем статус другим участникам
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "hand_raised",
+          isRaised: newHandRaised,
+        })
+      );
     }
   };
 
@@ -228,6 +527,7 @@ export default function Room() {
       }
 
       setIsScreenSharing(false);
+      localStateRef.current.screenSharing = false;
     } else {
       // Начинаем демонстрацию
       try {
@@ -261,109 +561,13 @@ export default function Room() {
         };
 
         setIsScreenSharing(true);
+        localStateRef.current.screenSharing = true;
       } catch (err) {
         console.error("Ошибка демонстрации экрана:", err);
         setError("Не удалось запустить демонстрацию экрана");
       }
     }
   };
-
-  useEffect(() => {
-    if (!room) return;
-
-    let isInitialized = false;
-
-    const initMediaAndWebSocket = async () => {
-      if (isInitialized) return;
-      if (wsRef.current?.readyState === WebSocket.OPEN) return;
-
-      isInitialized = true;
-
-      try {
-        // Получаем список устройств
-        await getMediaDevices();
-
-        let stream;
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-            audio: true,
-          });
-          setIsVideoOn(true);
-        } catch (err) {
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              video: false,
-              audio: true,
-            });
-            setIsVideoOn(false);
-          } catch (audioErr) {
-            throw new Error("Не удалось получить доступ к микрофону");
-          }
-        }
-
-        localStreamRef.current = stream;
-
-        setTimeout(() => {
-          if (localVideoRef.current && stream) {
-            localVideoRef.current.srcObject = stream;
-          }
-        }, 200);
-
-        const baseURL = api.defaults.baseURL;
-        const host = baseURL.split("//")[1];
-        const protocol = baseURL.startsWith("https") ? "wss:" : "ws:";
-
-        const token = localStorage.getItem("token_room");
-
-        const wsUrl = token
-          ? `${protocol}//${host}/ws/room/${id}?token=${encodeURIComponent(token)}`
-          : `${protocol}//${host}/ws/room/${id}`;
-
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-
-        const connectionTimeout = setTimeout(() => {
-          if (ws.readyState !== WebSocket.OPEN) {
-            ws.close();
-            setError("Не удалось подключиться к серверу");
-          }
-        }, 15000);
-
-        ws.onopen = () => {
-          clearTimeout(connectionTimeout);
-        };
-
-        ws.onmessage = (event) => {
-          handleWSMessage(event, stream);
-        };
-
-        ws.onerror = (e) => {
-          clearTimeout(connectionTimeout);
-          setError("Ошибка WebSocket подключения");
-        };
-
-        ws.onclose = (event) => {
-          clearTimeout(connectionTimeout);
-
-          if (!event.wasClean) {
-            setError("Соединение разорвано");
-          }
-        };
-      } catch (e) {
-        setError(e.message || "Ошибка инициализации");
-      }
-    };
-
-    initMediaAndWebSocket();
-
-    return () => {
-      stopMediaAndCleanup();
-    };
-  }, [room]);
 
   useEffect(() => {
     if (localStreamRef.current && localVideoRef.current) {
@@ -377,8 +581,11 @@ export default function Room() {
 
       switch (data.type) {
         case "active_peers":
+          // Восстанавливаем соединения с активными пирами
           data.peers.forEach((peerToken) => {
-            createPeerConnection(peerToken, localStream, true);
+            if (!peerConnectionsRef.current[peerToken]) {
+              createPeerConnection(peerToken, localStream, true);
+            }
           });
           break;
 
@@ -412,13 +619,73 @@ export default function Room() {
           }));
           break;
 
+        case "speaking_status":
+          setSpeakingStatus(prev => ({
+            ...prev,
+            [data.from]: data.isSpeaking,
+          }));
+          break;
+          
+        case "hand_raised":
+          setHandRaised(prev => ({
+            ...prev,
+            [data.from]: data.isRaised,
+          }));
+          break;
+          
+        case "user_role":
+          if (data.userToken === localStorage.getItem("token_room")) {
+            setIsHost(data.isHost);
+          }
+          break;
+
+        case "room_state":
+          // Восстанавливаем полное состояние комнаты
+          if (data.participants) {
+            setParticipants(data.participants);
+            
+            // Восстанавливаем статусы участников
+            const newMediaStatus = {};
+            const newSpeakingStatus = {};
+            const newHandRaised = {};
+            
+            data.participants.forEach(participant => {
+              if (participant.mediaStatus) {
+                newMediaStatus[participant.token] = participant.mediaStatus;
+              }
+              if (participant.speaking !== undefined) {
+                newSpeakingStatus[participant.token] = participant.speaking;
+              }
+              if (participant.handRaised !== undefined) {
+                newHandRaised[participant.token] = participant.handRaised;
+              }
+            });
+            
+            setPeerMediaStatus(newMediaStatus);
+            setSpeakingStatus(newSpeakingStatus);
+            setHandRaised(newHandRaised);
+          }
+          break;
+
+        case "reconnect_success":
+          console.log("Успешное переподключение, состояние восстановлено");
+          setConnectionStatus("connected");
+          break;
+
         default:
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Ошибка обработки сообщения:", e);
+    }
   };
 
   const createPeerConnection = (peerToken, localStream, initiator) => {
     try {
+      // Закрываем существующее соединение если есть
+      if (peerConnectionsRef.current[peerToken]) {
+        peerConnectionsRef.current[peerToken].close();
+      }
+
       const pc = new RTCPeerConnection(iceServers);
       peerConnectionsRef.current[peerToken] = pc;
 
@@ -448,15 +715,30 @@ export default function Room() {
       };
 
       pc.oniceconnectionstatechange = () => {
-        if (pc.iceConnectionState === "disconnected") {
-          closePeerConnection(peerToken);
+        const state = pc.iceConnectionState;
+        console.log(`Peer ${peerToken} ICE state:`, state);
+        
+        if (state === "disconnected" || state === "failed") {
+          console.log(`Соединение с ${peerToken} разорвано, пытаемся восстановить...`);
+          // Пытаемся восстановить соединение
+          setTimeout(() => {
+            if (pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "checking") {
+              createPeerConnection(peerToken, localStream, true);
+            }
+          }, 2000);
         }
+      };
+
+      pc.onconnectionstatechange = () => {
+        console.log(`Peer ${peerToken} connection state:`, pc.connectionState);
       };
 
       if (initiator) {
         createOffer(peerToken, pc);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Ошибка создания peer connection:", e);
+    }
   };
 
   const createOffer = async (peerToken, pc) => {
@@ -464,14 +746,18 @@ export default function Room() {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      wsRef.current.send(
-        JSON.stringify({
-          type: "offer",
-          offer: offer,
-          target: peerToken,
-        })
-      );
-    } catch (e) {}
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "offer",
+            offer: offer,
+            target: peerToken,
+          })
+        );
+      }
+    } catch (e) {
+      console.error("Ошибка создания offer:", e);
+    }
   };
 
   const handleOffer = async (offer, fromPeerToken, localStream) => {
@@ -486,14 +772,18 @@ export default function Room() {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      wsRef.current.send(
-        JSON.stringify({
-          type: "answer",
-          answer: answer,
-          target: fromPeerToken,
-        })
-      );
-    } catch (e) {}
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "answer",
+            answer: answer,
+            target: fromPeerToken,
+          })
+        );
+      }
+    } catch (e) {
+      console.error("Ошибка обработки offer:", e);
+    }
   };
 
   const handleAnswer = async (answer, fromPeerToken) => {
@@ -502,7 +792,9 @@ export default function Room() {
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(answer));
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Ошибка обработки answer:", e);
+    }
   };
 
   const handleIceCandidate = async (candidate, fromPeerToken) => {
@@ -511,7 +803,9 @@ export default function Room() {
       if (pc) {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Ошибка обработки ICE candidate:", e);
+    }
   };
 
   const closePeerConnection = (peerToken) => {
@@ -531,9 +825,26 @@ export default function Room() {
       delete newStatus[peerToken];
       return newStatus;
     });
+
+    setSpeakingStatus((prev) => {
+      const newStatus = { ...prev };
+      delete newStatus[peerToken];
+      return newStatus;
+    });
+
+    setHandRaised((prev) => {
+      const newStatus = { ...prev };
+      delete newStatus[peerToken];
+      return newStatus;
+    });
   };
 
   const stopMediaAndCleanup = () => {
+    // Останавливаем переподключение
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+    }
+
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
         track.stop();
@@ -568,8 +879,12 @@ export default function Room() {
       localVideoRef.current.srcObject = null;
     }
 
+    stopAudioAnalyser();
+
     setRemotePeers({});
     setPeerMediaStatus({});
+    setSpeakingStatus({});
+    setHandRaised({});
   };
 
   const toggleAudio = () => {
@@ -579,6 +894,7 @@ export default function Room() {
         audioTrack.enabled = !audioTrack.enabled;
         const newAudioState = audioTrack.enabled;
         setIsAudioOn(newAudioState);
+        localStateRef.current.audioOn = newAudioState;
 
         broadcastMediaStatus(newAudioState, isVideoOn);
       }
@@ -592,6 +908,7 @@ export default function Room() {
         videoTrack.enabled = !videoTrack.enabled;
         const newVideoState = videoTrack.enabled;
         setIsVideoOn(newVideoState);
+        localStateRef.current.videoOn = newVideoState;
 
         broadcastMediaStatus(isAudioOn, newVideoState);
       }
@@ -626,6 +943,14 @@ export default function Room() {
   };
 
   const hasVideoTrack = localStreamRef.current?.getVideoTracks().length > 0;
+
+  // Ручное переподключение
+  const manualReconnect = () => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+    }
+    reconnect();
+  };
 
   if (needsAuth) {
     return (
@@ -664,8 +989,6 @@ export default function Room() {
                 boxShadow: "0 8px 24px rgba(102, 126, 234, 0.3)",
               }}
             >
-
-           
               🎥
             </div>
             <h2
@@ -876,8 +1199,24 @@ export default function Room() {
             100% { transform: rotate(360deg); }
           }
           @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+            0%, 100% { 
+              opacity: 1;
+              transform: scale(1);
+            }
+            50% { 
+              opacity: 0.7;
+              transform: scale(1.05);
+            }
+          }
+          @keyframes pulse-slow {
+            0%, 100% { 
+              opacity: 1;
+              transform: scale(1);
+            }
+            50% { 
+              opacity: 0.8;
+              transform: scale(1.1);
+            }
           }
           .control-button {
             transition: all 0.3s ease;
@@ -905,11 +1244,90 @@ export default function Room() {
         `}
       </style>
 
-       <VideoCallChat
-              roomCode={room.code}
-              isOpen={isChatOpen}
-              onToggle={() => setIsChatOpen(!isChatOpen)}
-            />
+      {/* Индикатор статуса соединения */}
+      {connectionStatus !== "connected" && (
+        <div
+          style={{
+            position: "fixed",
+            top: "20px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: connectionStatus === "reconnecting" 
+              ? "rgba(255, 152, 0, 0.9)" 
+              : "rgba(244, 67, 54, 0.9)",
+            backdropFilter: "blur(10px)",
+            padding: "12px 24px",
+            borderRadius: "12px",
+            color: "#fff",
+            fontSize: "14px",
+            fontWeight: "600",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            zIndex: 10000,
+            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.3)",
+            border: "1px solid rgba(255, 255, 255, 0.2)",
+          }}
+        >
+          {connectionStatus === "reconnecting" ? (
+            <>
+              <div
+                style={{
+                  width: "16px",
+                  height: "16px",
+                  border: "2px solid #fff",
+                  borderTop: "2px solid transparent",
+                  borderRadius: "50%",
+                  animation: "spin 1s linear infinite",
+                }}
+              />
+              <span>Переподключение... ({reconnectAttemptsRef.current}/{maxReconnectAttempts})</span>
+              <button
+                onClick={manualReconnect}
+                style={{
+                  background: "rgba(255, 255, 255, 0.2)",
+                  border: "none",
+                  borderRadius: "6px",
+                  color: "#fff",
+                  padding: "4px 8px",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                  marginLeft: "10px",
+                }}
+              >
+                Ускорить
+              </button>
+            </>
+          ) : (
+            <>
+              <span>❌ Соединение прервано</span>
+              <button
+                onClick={manualReconnect}
+                style={{
+                  background: "rgba(255, 255, 255, 0.2)",
+                  border: "none",
+                  borderRadius: "6px",
+                  color: "#fff",
+                  padding: "4px 8px",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                  marginLeft: "10px",
+                }}
+              >
+                Переподключить
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+       <VideoCallChat 
+        roomCode={id} 
+        isOpen={isChatOpen} 
+        onToggle={() => setIsChatOpen(!isChatOpen)}
+        unreadCount={unreadCount}
+        setUnreadCount={setUnreadCount}
+      />
 
       {/* Header */}
       <div
@@ -938,6 +1356,7 @@ export default function Room() {
           </h1>
           <p style={{ margin: 0, fontSize: "13px", opacity: 0.7 }}>
             {Object.keys(remotePeers).length + 1} участник(ов)
+            {connectionStatus !== "connected" && " • Соединение..."}
           </p>
         </div>
 
@@ -1149,6 +1568,56 @@ export default function Room() {
             </div>
           )}
 
+          {/* Индикатор говорящего для локального видео */}
+          {speakingStatus.local && (
+            <div
+              style={{
+                position: "absolute",
+                top: "15px",
+                left: "15px",
+                width: "40px",
+                height: "40px",
+                borderRadius: "50%",
+                background: "rgba(76, 175, 80, 0.9)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "20px",
+                animation: "pulse 1s ease-in-out infinite",
+                border: "2px solid #fff",
+                zIndex: 10,
+              }}
+              title="Вы говорите"
+            >
+              🎤
+            </div>
+          )}
+
+          {/* Индикатор поднятой руки для локального видео */}
+          {handRaised.local && (
+            <div
+              style={{
+                position: "absolute",
+                top: speakingStatus.local ? "65px" : "15px",
+                left: "15px",
+                width: "40px",
+                height: "40px",
+                borderRadius: "50%",
+                background: "rgba(255, 152, 0, 0.9)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "20px",
+                animation: "pulse 2s ease-in-out infinite",
+                border: "2px solid #fff",
+                zIndex: 10,
+              }}
+              title="Вы подняли руку"
+            >
+              ✋
+            </div>
+          )}
+
           <div
             style={{
               position: "absolute",
@@ -1170,6 +1639,7 @@ export default function Room() {
             {isScreenSharing && <span style={{ color: "#38ef7d" }}>🖥️</span>}
             {!isVideoOn && <span style={{ opacity: 0.6 }}>📵</span>}
             {!isAudioOn && <span style={{ opacity: 0.6 }}>🔇</span>}
+            {isHost && <span style={{ color: "#ffeb3b" }}>👑</span>}
           </div>
         </div>
 
@@ -1186,6 +1656,9 @@ export default function Room() {
               peerToken={peerToken}
               audioOn={mediaStatus.audioOn}
               videoOn={mediaStatus.videoOn}
+              isSpeaking={speakingStatus[peerToken]}
+              isHandRaised={handRaised[peerToken]}
+              connectionStatus={connectionStatus}
             />
           );
         })}
@@ -1204,6 +1677,33 @@ export default function Room() {
           flexWrap: "wrap",
         }}
       >
+        {/* Кнопка поднятия руки */}
+        <button
+          onClick={toggleHandRaise}
+          className="control-button"
+          style={{
+            width: "60px",
+            height: "60px",
+            borderRadius: "50%",
+            border: "none",
+            background: handRaised.local
+              ? "linear-gradient(135deg, #ff9800 0%, #ff5722 100%)"
+              : "rgba(255, 255, 255, 0.15)",
+            color: "#fff",
+            fontSize: "24px",
+            cursor: "pointer",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            boxShadow: handRaised.local
+              ? "0 4px 15px rgba(255, 152, 0, 0.4)"
+              : "0 4px 15px rgba(255, 255, 255, 0.1)",
+          }}
+          title={handRaised.local ? "Опустить руку" : "Поднять руку"}
+        >
+          {handRaised.local ? "✋" : "🤚"}
+        </button>
+
         {/* Микрофон */}
         <button
           onClick={toggleAudio}
@@ -1446,7 +1946,7 @@ export default function Room() {
 }
 
 // Remote Video Component
-function RemoteVideo({ stream, peerToken, audioOn, videoOn }) {
+function RemoteVideo({ stream, peerToken, audioOn, videoOn, isSpeaking, isHandRaised, connectionStatus }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -1501,6 +2001,80 @@ function RemoteVideo({ stream, peerToken, audioOn, videoOn }) {
           }}
         >
           👤
+        </div>
+      )}
+
+      {/* Индикатор говорящего */}
+      {isSpeaking && (
+        <div
+          style={{
+            position: "absolute",
+            top: "15px",
+            left: "15px",
+            width: "40px",
+            height: "40px",
+            borderRadius: "50%",
+            background: "rgba(76, 175, 80, 0.9)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "20px",
+            animation: "pulse 1s ease-in-out infinite",
+            border: "2px solid #fff",
+            zIndex: 10,
+          }}
+          title="Говорит"
+        >
+          🎤
+        </div>
+      )}
+
+      {/* Индикатор поднятой руки */}
+      {isHandRaised && (
+        <div
+          style={{
+            position: "absolute",
+            top: isSpeaking ? "65px" : "15px",
+            left: "15px",
+            width: "40px",
+            height: "40px",
+            borderRadius: "50%",
+            background: "rgba(255, 152, 0, 0.9)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "20px",
+            animation: "pulse 2s ease-in-out infinite",
+            border: "2px solid #fff",
+            zIndex: 10,
+          }}
+          title="Поднял руку"
+        >
+          ✋
+        </div>
+      )}
+
+      {/* Индикатор проблем с соединением */}
+      {connectionStatus !== "connected" && (
+        <div
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: "rgba(0, 0, 0, 0.8)",
+            backdropFilter: "blur(10px)",
+            padding: "12px 20px",
+            borderRadius: "10px",
+            color: "#fff",
+            fontSize: "14px",
+            fontWeight: "600",
+            textAlign: "center",
+            border: "1px solid rgba(255, 255, 255, 0.2)",
+          }}
+        >
+          <div style={{ marginBottom: "8px" }}>🔄</div>
+          <div>Переподключение...</div>
         </div>
       )}
 
